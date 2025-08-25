@@ -1,4 +1,3 @@
-// components/PhaserGame.jsx
 "use client";
 import { useEffect, useRef } from "react";
 
@@ -12,26 +11,153 @@ export default function PhaserGame() {
     (async () => {
       const Phaser = await import("phaser");
 
+      // --------------------------- Menu Scene ---------------------------
+      class MenuScene extends Phaser.Scene {
+        constructor() { super("Menu"); }
+        init(data) {
+          // pull lastScore if coming from game over
+          this.lastScore = typeof data?.lastScore === "number"
+            ? data.lastScore
+            : parseInt(localStorage.getItem("bk_lastScore") || "0", 10);
+
+          this.bestScore = parseInt(localStorage.getItem("bk_bestScore") || "0", 10);
+          const savedDiff = localStorage.getItem("bk_difficulty");
+          this.difficulty = (data?.difficulty || savedDiff || "easy");
+          this.options = ["Play", "Score", "Settings"];
+          this.selectedIndex = 0;
+          this.scorePanelVisible = false;
+        }
+        create() {
+          const w = this.scale.width;
+          const h = this.scale.height;
+
+          // background
+          this.add.rectangle(0, 0, w * 2, h * 2, 0x0b0d12).setOrigin(0);
+          const title = this.add.text(w/2, 90, "BUG KNIGHT LITE", { fontSize: 42, color: "#eaeaea" }).setOrigin(0.5);
+
+          // menu items
+          this.menuTexts = this.options.map((label, i) => {
+            const txt = this.add.text(w/2, 200 + i * 48, label, { fontSize: 28, color: "#bdbdbd" })
+              .setOrigin(0.5)
+              .setInteractive({ useHandCursor: true })
+              .on("pointerover", () => { this.selectedIndex = i; this.refreshMenu(); })
+              .on("pointerdown", () => this.activateSelection());
+            return txt;
+          });
+
+          // Sub-info lines (difficulty + score)
+          this.diffText = this.add.text(w/2, 200 + 2 * 48 + 34, "", { fontSize: 18, color: "#9ecfff" }).setOrigin(0.5);
+          this.footer = this.add.text(w/2, h - 40, "↑/↓ select • Enter confirm • ←/→ change in Settings", { fontSize: 14, color: "#7e8a9a" }).setOrigin(0.5);
+
+          // Score panel (hidden until "Score")
+          this.scorePanel = this.add.container(w/2, 200 + 1 * 48 + 90);
+          const panelBg = this.add.rectangle(0, 0, 380, 120, 0x121723, 0.95).setStrokeStyle(1, 0x2b3a55);
+          this.lastText = this.add.text(0, -20, `Last: ${this.lastScore}`, { fontSize: 20, color: "#eaeaea" }).setOrigin(0.5);
+          this.bestText = this.add.text(0, 16, `Best: ${this.bestScore}`, { fontSize: 20, color: "#ffd54f" }).setOrigin(0.5);
+          this.scorePanel.add([panelBg, this.lastText, this.bestText]).setVisible(false);
+
+          // Keyboard
+          this.cursors = this.input.keyboard.createCursorKeys();
+          this.keys = this.input.keyboard.addKeys({
+            W: Phaser.Input.Keyboard.KeyCodes.W,
+            S: Phaser.Input.Keyboard.KeyCodes.S,
+            A: Phaser.Input.Keyboard.KeyCodes.A,
+            D: Phaser.Input.Keyboard.KeyCodes.D,
+            ENTER: Phaser.Input.Keyboard.KeyCodes.ENTER,
+            SPACE: Phaser.Input.Keyboard.KeyCodes.SPACE,
+            LEFT: Phaser.Input.Keyboard.KeyCodes.LEFT,
+            RIGHT: Phaser.Input.Keyboard.KeyCodes.RIGHT,
+          });
+
+          this.refreshMenu();
+        }
+
+        justDown(k) { return !!(k && Phaser.Input.Keyboard.JustDown(k)); }
+
+        refreshMenu() {
+          this.menuTexts.forEach((t, i) => {
+            const active = i === this.selectedIndex;
+            t.setColor(active ? "#eaeaea" : "#bdbdbd");
+            t.setScale(active ? 1.08 : 1.0);
+          });
+          this.diffText.setText(`Difficulty: ${this.difficulty.toUpperCase()}`);
+        }
+
+        toggleScorePanel(show) {
+          this.scorePanelVisible = (show ?? !this.scorePanelVisible);
+          this.scorePanel.setVisible(this.scorePanelVisible);
+          // refresh score numbers from storage on open
+          if (this.scorePanelVisible) {
+            const last = parseInt(localStorage.getItem("bk_lastScore") || String(this.lastScore || 0), 10);
+            const best = parseInt(localStorage.getItem("bk_bestScore") || String(this.bestScore || 0), 10);
+            this.lastText.setText(`Last: ${last}`);
+            this.bestText.setText(`Best: ${best}`);
+          }
+        }
+
+        activateSelection() {
+          const label = this.options[this.selectedIndex];
+          if (label === "Play") {
+            localStorage.setItem("bk_difficulty", this.difficulty);
+            this.scene.start("MainScene", { difficulty: this.difficulty });
+          } else if (label === "Score") {
+            this.toggleScorePanel(true);
+          } else if (label === "Settings") {
+            // cycle difficulty
+            this.difficulty = (this.difficulty === "easy") ? "normal"
+                              : (this.difficulty === "normal") ? "hard" : "easy";
+            localStorage.setItem("bk_difficulty", this.difficulty);
+            this.refreshMenu();
+          }
+        }
+
+        update() {
+          // nav
+          if (this.justDown(this.cursors?.up) || this.justDown(this.keys?.W)) {
+            this.selectedIndex = (this.selectedIndex + this.options.length - 1) % this.options.length;
+            this.refreshMenu(); this.toggleScorePanel(false);
+          }
+          if (this.justDown(this.cursors?.down) || this.justDown(this.keys?.S)) {
+            this.selectedIndex = (this.selectedIndex + 1) % this.options.length;
+            this.refreshMenu(); this.toggleScorePanel(false);
+          }
+          // activate
+          if (this.justDown(this.keys?.ENTER) || this.justDown(this.keys?.SPACE)) {
+            this.activateSelection();
+          }
+          // left/right change difficulty when "Settings" active
+          if (this.selectedIndex === 2) {
+            if (this.justDown(this.cursors?.left) || this.justDown(this.keys?.A)) {
+              this.difficulty = (this.difficulty === "hard") ? "normal"
+                                : (this.difficulty === "normal") ? "easy" : "hard";
+              localStorage.setItem("bk_difficulty", this.difficulty);
+              this.refreshMenu();
+            }
+            if (this.justDown(this.cursors?.right) || this.justDown(this.keys?.D)) {
+              this.difficulty = (this.difficulty === "easy") ? "normal"
+                                : (this.difficulty === "normal") ? "hard" : "easy";
+              localStorage.setItem("bk_difficulty", this.difficulty);
+              this.refreshMenu();
+            }
+          }
+        }
+      }
+
+      // --------------------------- Main Game Scene ---------------------------
       class MainScene extends Phaser.Scene {
         constructor() { super("MainScene"); }
 
-        init() {
+        init(data) {
           // ----- WORLD SIZE -----
-          this.levelWidth  = 3200;   // change freely
-          this.levelHeight = 720;    // change freely
-          this.TILE = 40;            // must divide both dimensions
+          this.levelWidth  = 3200;
+          this.levelHeight = 720;
+          this.TILE = 40;
           this.cols = Math.floor(this.levelWidth / this.TILE);
           this.rows = Math.floor(this.levelHeight / this.TILE);
-
-          this.playerMapCollider = null;
-          this.enemyMapCollider  = null;
-
-
-          // sanity: enforce exact fit
           this.levelWidth  = this.cols * this.TILE;
           this.levelHeight = this.rows * this.TILE;
 
-          // player & game state
+          // state
           this.playerMaxHP = 5;
           this.playerHP = this.playerMaxHP;
           this.facing = 1;
@@ -39,31 +165,34 @@ export default function PhaserGame() {
           this.dashTimer = 0; this.dashCooldown = 0;
           this.invulnTimer = 0;
 
-          // coins & difficulty
+          // score & difficulty
           this.coins = 0;
-          this.difficulty = "easy"; // "easy" | "normal" | "hard"
+          const saved = typeof window !== "undefined" ? localStorage.getItem("bk_difficulty") : null;
+          this.difficulty = data?.difficulty || saved || "easy";
           this.maxAlive = 0;
 
-          // map containers
+          // map
           this.mapSolids = null;
           this.allSpawnPoints = [];
-          this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 }; // fallback
+          this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 };
+
+          // colliders refs
+          this.playerMapCollider = null;
+          this.enemyMapCollider  = null;
+
+          // spawn event
+          this.spawnEvent = null;
         }
 
         preload() {
-          // Simple textures (programmatic)
           const g = this.add.graphics();
-          // player (24x36)
           g.fillStyle(0x90caf9, 1).fillRect(0, 0, 24, 36).generateTexture("playerTex", 24, 36).clear();
-          // enemy (24x24)
           g.fillStyle(0xff6b6b, 1).fillRect(0, 0, 24, 24).generateTexture("enemyTex", 24, 24).clear();
-          // solid block (TILE x TILE)
           g.fillStyle(0x3a3d46, 1).fillRect(0, 0, this.TILE, this.TILE).generateTexture("blockTex", this.TILE, this.TILE).clear();
-          // parallax tiles
+          g.fillStyle(0xffd54f, 1).fillCircle(6, 6, 6).generateTexture("coinTex", 12, 12).clear();
           g.fillStyle(0x11131a, 1).fillRect(0, 0, 64, 64).generateTexture("bgDark", 64, 64).clear();
           g.fillStyle(0x171a24, 1).fillRect(0, 0, 64, 64).generateTexture("bgMid", 64, 64).destroy();
 
-          // Optional external ASCII maps (served from /public/maps/*.txt)
           this.load.text("map_easy",   "/maps/easy.txt");
           this.load.text("map_normal", "/maps/normal.txt");
           this.load.text("map_hard",   "/maps/hard.txt");
@@ -73,8 +202,6 @@ export default function PhaserGame() {
           // World & camera
           this.physics.world.setBounds(0, 0, this.levelWidth, this.levelHeight);
           this.cameras.main.setBounds(0, 0, this.levelWidth, this.levelHeight);
-
-          // Parallax backgrounds
           this.bg1 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgDark").setOrigin(0,0);
           this.bg2 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgMid").setOrigin(0,0);
 
@@ -103,24 +230,23 @@ export default function PhaserGame() {
             A: Phaser.Input.Keyboard.KeyCodes.A,
             D: Phaser.Input.Keyboard.KeyCodes.D,
             W: Phaser.Input.Keyboard.KeyCodes.W,
-            F: Phaser.Input.Keyboard.KeyCodes.F, // attack
+            Z: Phaser.Input.Keyboard.KeyCodes.Z, // attack
             X: Phaser.Input.Keyboard.KeyCodes.X, // dash
             ONE:   Phaser.Input.Keyboard.KeyCodes.ONE,
             TWO:   Phaser.Input.Keyboard.KeyCodes.TWO,
             THREE: Phaser.Input.Keyboard.KeyCodes.THREE,
+            ESC:   Phaser.Input.Keyboard.KeyCodes.ESC
           });
 
           // HUD
           this.hud = this.add.text(12, 12, "", { fontSize: 16, color: "#eaeaea" }).setScrollFactor(0);
           this.toast = this.add.text(12, 36, "", { fontSize: 14, color: "#a8e6cf" }).setScrollFactor(0);
 
-          // Build map from ASCII (based on difficulty)
+          // Build map & colliders
           this.buildMapForDifficulty(this.difficulty);
           this.attachColliders();
-          // Collisions & overlaps after map exists
-          this.attachColliders();
 
-          // Attack overlap -> damage & coins
+          // Combat overlaps
           this.physics.add.overlap(this.attack, this.enemies, (hitbox, enemy) => {
             if (!this.attack.body.enable || !enemy.active) return;
             const hp = (enemy.getData("hp") ?? 2) - 1;
@@ -131,48 +257,59 @@ export default function PhaserGame() {
             enemy.setVelocityX(this.facing * 100);
             if (hp <= 0) {
               this.coins += enemy.getData("coin") ?? 1;
-              const coin = this.add.image(enemy.x, enemy.y - 10, "coinTex" /* optional if you add one */);
-              if (coin) this.tweens.add({ targets: coin, y: coin.y - 24, alpha: 0, duration: 450, onComplete: () => coin.destroy() });
+              const coin = this.add.image(enemy.x, enemy.y - 10, "coinTex");
+              this.tweens.add({ targets: coin, y: coin.y - 24, alpha: 0, duration: 450, onComplete: () => coin.destroy() });
               enemy.destroy();
             }
           });
 
-          // Player gets hit
+          // Damage to player
           this.physics.add.overlap(this.player, this.enemies, () => {
             if (this.invulnTimer > 0) return;
             this.playerHP = Math.max(0, this.playerHP - 1);
             this.invulnTimer = 800;
             this.player.setTint(0xffe082);
             this.player.setVelocity(-this.facing * 240, -200);
-            if (this.playerHP <= 0) this.scene.restart();
+            if (this.playerHP <= 0) this.gameOver();
           });
 
           // Start spawner
           this.setupSpawner();
+
+          // ESC -> back to menu (keeps last score)
+          this.input.keyboard.on("keydown-ESC", () => this.gameOver());
         }
 
-        // -------------------- MAP BUILDING --------------------
+        // ---------- Colliders mgmt ----------
+        detachColliders() {
+          if (this.playerMapCollider) { this.playerMapCollider.destroy(); this.playerMapCollider = null; }
+          if (this.enemyMapCollider)  { this.enemyMapCollider.destroy();  this.enemyMapCollider  = null; }
+        }
+        attachColliders() {
+          this.detachColliders();
+          this.playerMapCollider = this.physics.add.collider(
+            this.player,
+            this.mapSolids,
+            () => {
+              if (this.player.body.blocked.down || this.player.body.touching.down) this.jumpCount = 0;
+            }
+          );
+          this.enemyMapCollider = this.physics.add.collider(this.enemies, this.mapSolids);
+        }
 
+        // ---------- Map building ----------
         buildMapForDifficulty(mode) {
-          // Destroy old solids
           this.detachColliders();
           if (this.mapSolids) this.mapSolids.destroy(true);
           this.mapSolids = this.physics.add.staticGroup();
           this.allSpawnPoints = [];
 
-          // Get ASCII: prefer preloaded text files, else generate
           let ascii = this.cache.text.get(
             mode === "easy" ? "map_easy" : mode === "normal" ? "map_normal" : "map_hard"
           );
-
-          if (!ascii) {
-            ascii = this.makeDefaultAscii(this.cols, this.rows, mode);
-          }
-
-          // Ensure exact rows×cols to match level size
+          if (!ascii) ascii = this.makeDefaultAscii(this.cols, this.rows, mode);
           ascii = this.fixAsciiToBounds(ascii, this.cols, this.rows);
 
-          // Parse & build
           const lines = ascii.split("\n");
           let foundS = false;
 
@@ -182,7 +319,6 @@ export default function PhaserGame() {
             for (let c = 0; c < this.cols; c++) {
               const ch = line[c] || ".";
               const x = c * this.TILE + this.TILE / 2;
-
               if (ch === "x") {
                 const blk = this.mapSolids.create(x, y, "blockTex");
                 blk.refreshBody();
@@ -194,80 +330,37 @@ export default function PhaserGame() {
               }
             }
           }
+          if (!foundS) this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 };
+          if (this.allSpawnPoints.length === 0) this.allSpawnPoints.push({ x: this.levelWidth * 0.6, y: this.TILE * 3 });
 
-          if (!foundS) {
-            this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 };
-          }
-          if (this.allSpawnPoints.length === 0) {
-            this.allSpawnPoints.push({ x: this.levelWidth * 0.6, y: this.TILE * 3 });
-          }
-
-          // Place / reset player
           this.player.setPosition(this.startPos.x, this.startPos.y);
           this.player.setVelocity(0, 0);
         }
 
-        // Pad/crop to rows×cols; bottom-aligns content for natural ground feel
         fixAsciiToBounds(ascii, cols, rows) {
           const clean = ascii.replace(/\r/g, "");
-          let rawLines = clean.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && _ === "")); // drop trailing empty
-          // crop or pad rows
-          if (rawLines.length > rows) {
-            // keep the last 'rows' lines => bottom align
-            rawLines = rawLines.slice(rawLines.length - rows);
-          } else if (rawLines.length < rows) {
-            const pad = ".".repeat(cols);
-            const needed = rows - rawLines.length;
-            rawLines = new Array(needed).fill(pad).concat(rawLines);
-          }
-          // ensure each line is cols wide
-          const fixed = rawLines.map(l => {
-            const line = l.replace(/\t/g, " "); // tabs -> spaces
-            if (line.length > cols) return line.slice(0, cols);
-            if (line.length < cols) return line + ".".repeat(cols - line.length);
-            return line;
+          let raw = clean.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && _ === ""));
+          if (raw.length > rows) raw = raw.slice(raw.length - rows);
+          else if (raw.length < rows) raw = new Array(rows - raw.length).fill(".".repeat(cols)).concat(raw);
+          const fixed = raw.map(l => {
+            const m = l.replace(/\t/g, " ");
+            if (m.length > cols) return m.slice(0, cols);
+            if (m.length < cols) return m + ".".repeat(cols - m.length);
+            return m;
           });
           return fixed.join("\n");
         }
-        detachColliders() {
-            if (this.playerMapCollider) { this.playerMapCollider.destroy(); this.playerMapCollider = null; }
-            if (this.enemyMapCollider)  { this.enemyMapCollider.destroy();  this.enemyMapCollider  = null; }
-        }
-        attachColliders() {
-            this.detachColliders();
-            this.playerMapCollider = this.physics.add.collider(
-                this.player,
-                this.mapSolids,
-                () => {
-                    if (this.player.body.blocked.down || this.player.body.touching.down) this.jumpCount = 0;        
-                }
-            );
-            this.enemyMapCollider = this.physics.add.collider(this.enemies, this.mapSolids);
-        }
 
-
-        // Procedural defaults sized to rows×cols
         makeDefaultAscii(cols, rows, mode) {
           const grid = Array.from({ length: rows }, () => Array(cols).fill("."));
-          const putHLine = (r, c1, c2) => {
-            for (let c = Math.max(0, c1); c <= Math.min(cols - 1, c2); c++) grid[r][c] = "x";
-          };
-
-          // ground (bottom two rows)
-          putHLine(rows - 1, 0, cols - 1);
-          putHLine(rows - 2, 0, cols - 1);
-
-          // platforms
-          putHLine(rows - 6, 10, Math.min(25, cols - 1));
-          putHLine(rows - 9, 35, Math.min(55, cols - 1));
-          putHLine(rows - 12, 60, Math.min(75, cols - 1));
-          putHLine(rows - 10, 2, 6);
-
-          // Start
-          grid[rows - 4][3] = "S";
-
-          // Spawns vary by mode
-          const addE = (c, r) => { if (r >= 0 && r < rows && c >= 0 && c < cols) grid[r][c] = "E"; };
+          const H = (r, c1, c2) => { for (let c = Math.max(0,c1); c <= Math.min(cols-1,c2); c++) grid[r][c] = "x"; };
+          H(rows-1, 0, cols-1); H(rows-2, 0, cols-1);
+          H(rows-6, 10, Math.min(25, cols-1));
+          H(rows-9, 35, Math.min(55, cols-1));
+          H(rows-12, 60, Math.min(75, cols-1));
+          H(rows-10, 2, 6);
+          grid[rows-4][3] = "S";
+          const addE = (c, r) => { if (r>=0 && r<rows && c>=0 && c<cols) grid[r][c] = "E"; };
           if (mode === "easy") {
             addE(Math.floor(cols * 0.45), rows - 7);
           } else if (mode === "normal") {
@@ -280,49 +373,33 @@ export default function PhaserGame() {
             addE(Math.floor(cols * 0.75), rows - 12);
             addE(Math.floor(cols * 0.85), rows - 7);
           }
-
-          return grid.map(row => row.join("")).join("\n");
+          return grid.map(r => r.join("")).join("\n");
         }
 
-        // -------------------- SPAWNER --------------------
-
+        // ---------- Spawner ----------
         setupSpawner() {
-          if (this.spawnEvent) this.spawnEvent.remove(false);
-
-          // Also (re)build map for this difficulty so spawns come from the right ASCII file
+          if (this.spawnEvent) { this.spawnEvent.remove(false); this.spawnEvent = null; }
           this.buildMapForDifficulty(this.difficulty);
           this.attachColliders();
-    
-            // Spawner settings
+
           let spawnEvery = 1500;
           let numSpawnPoints = 1;
           this.maxAlive = 6;
 
-          if (this.difficulty === "easy") {
-            spawnEvery = 1800; numSpawnPoints = 1; this.maxAlive = 4;
-          } else if (this.difficulty === "normal") {
-            spawnEvery = 1200; numSpawnPoints = Math.min(2, this.allSpawnPoints.length); this.maxAlive = 8;
-          } else {
-            spawnEvery = 800; numSpawnPoints = Math.min(5, this.allSpawnPoints.length); this.maxAlive = 16;
-          }
+          if (this.difficulty === "easy") { spawnEvery = 1800; numSpawnPoints = 1; this.maxAlive = 4; }
+          else if (this.difficulty === "normal") { spawnEvery = 1200; numSpawnPoints = Math.min(2, this.allSpawnPoints.length); this.maxAlive = 8; }
+          else { spawnEvery = 800; numSpawnPoints = Math.min(5, this.allSpawnPoints.length); this.maxAlive = 16; }
 
-          // Choose active spawn points
           this.activeSpawns = Phaser.Utils.Array.Shuffle([...this.allSpawnPoints]).slice(0, numSpawnPoints);
-
           this.toast.setText(`Mode: ${this.difficulty} — spawns: ${numSpawnPoints}`);
           this.time.delayedCall(1200, () => this.toast.setText(""));
 
-          this.spawnEvent = this.time.addEvent({
-            delay: spawnEvery,
-            loop: true,
-            callback: this.trySpawnEnemy,
-            callbackScope: this
-          });
+          this.spawnEvent = this.time.addEvent({ delay: spawnEvery, loop: true, callback: this.trySpawnEnemy, callbackScope: this });
         }
 
         trySpawnEnemy() {
           if (this.enemies.countActive(true) >= this.maxAlive) return;
-          const near = [...this.activeSpawns].sort((a, b) => Math.abs(a.x - this.player.x) - Math.abs(b.x - this.player.x));
+          const near = [...this.activeSpawns].sort((a,b) => Math.abs(a.x - this.player.x) - Math.abs(b.x - this.player.x));
           const choice = Phaser.Math.RND.pick(near.slice(0, Math.min(3, near.length)));
           const e = this.enemies.create(choice.x, choice.y, "enemyTex");
           e.setCollideWorldBounds(true).setBounce(0.1);
@@ -332,84 +409,92 @@ export default function PhaserGame() {
           e.setData("coin", 1);
         }
 
-        // -------------------- UPDATE --------------------
+        // ---------- Game Over ----------
+        gameOver() {
+          try {
+            const last = this.coins | 0;
+            const best = parseInt(localStorage.getItem("bk_bestScore") || "0", 10);
+            localStorage.setItem("bk_lastScore", String(last));
+            if (last > best) localStorage.setItem("bk_bestScore", String(last));
+            localStorage.setItem("bk_difficulty", this.difficulty);
+          } catch (e) {}
 
-        update(time, delta) {
+          if (this.spawnEvent) { this.spawnEvent.remove(false); this.spawnEvent = null; }
+          this.detachColliders?.();
+          this.enemies?.clear(true, true);
+          this.scene.start("Menu", { lastScore: this.coins, difficulty: this.difficulty, fromGameOver: true });
+        }
+
+        // ---------- Helpers ----------
+        justDown(key) { return !!(key && Phaser.Input.Keyboard.JustDown(key)); }
+        isDown(key)   { return !!(key && key.isDown); }
+
+        update(_time, delta) {
           const dt = delta;
-
-          // Parallax
           this.bg1.tilePositionX = this.cameras.main.scrollX * 0.3;
           this.bg2.tilePositionX = this.cameras.main.scrollX * 0.6;
 
-          // Timers
           this.dashCooldown = Math.max(0, this.dashCooldown - dt);
           this.dashTimer = Math.max(0, this.dashTimer - dt);
           this.invulnTimer = Math.max(0, this.invulnTimer - dt);
           if (this.invulnTimer === 0) this.player.clearTint();
 
-          const left = this.cursors.left.isDown || this.keys.A.isDown;
-          const right = this.cursors.right.isDown || this.keys.D.isDown;
-          const onGround = this.player.body.blocked.down || this.player.body.touching.down;
+          const left = this.isDown(this.cursors?.left)  || this.isDown(this.keys?.A);
+          const right= this.isDown(this.cursors?.right) || this.isDown(this.keys?.D);
+          const onGround = this.player.body.blocked?.down || this.player.body.touching?.down;
 
           // Move
           const runSpeed = 320;
           if (this.dashTimer > 0) {
             // keep momentum
           } else if (left && !right) {
-            this.player.setVelocityX(-runSpeed);
-            this.facing = -1;
+            this.player.setVelocityX(-runSpeed); this.facing = -1;
           } else if (right && !left) {
-            this.player.setVelocityX(runSpeed);
-            this.facing = 1;
+            this.player.setVelocityX(runSpeed); this.facing = 1;
           } else {
             this.player.setVelocityX(0);
           }
 
           // Jump / double jump
-          const jumpPressed = Phaser.Input.Keyboard.JustDown(this.cursors.up) || Phaser.Input.Keyboard.JustDown(this.keys.W);
+          const jumpPressed = this.justDown(this.cursors?.up) || this.justDown(this.keys?.W);
           if (jumpPressed) {
-            if (onGround) {
-              this.jumpCount = 1;
-              this.player.setVelocityY(-470);
-            } else if (this.jumpCount < this.maxJumps) {
-              this.jumpCount++;
-              this.player.setVelocityY(-450);
-            }
+            if (onGround) { this.jumpCount = 1; this.player.setVelocityY(-470); }
+            else if (this.jumpCount < this.maxJumps) { this.jumpCount++; this.player.setVelocityY(-450); }
           }
 
           // Dash
-          if (Phaser.Input.Keyboard.JustDown(this.keys.X) && this.dashCooldown === 0) {
+          if (this.justDown(this.keys?.X) && this.dashCooldown === 0) {
             const dashV = 680 * this.facing;
             this.player.setVelocityX(dashV);
             this.dashTimer = 140;
             this.dashCooldown = 500;
           }
 
-          // Attack
-          if (Phaser.Input.Keyboard.JustDown(this.keys.F)) {
+          // Attack (use your active key here; you fixed earlier)
+          if (this.justDown(this.keys?.Z)) {
             const px = this.player.x + this.facing * 30;
             const py = this.player.y + 2;
             this.attack.setPosition(px, py);
             this.attack.body.setEnable(true);
             this.attack.setVisible(true);
-            this.attack.setFillStyle(0xffffff, 0.3);
-            this.time.delayedCall(120, () => { this.attack.body.setEnable(false); this.attack.setVisible(true); });
+            this.time.delayedCall(120, () => { this.attack.body.setEnable(false); this.attack.setVisible(false); });
           }
 
-          // Difficulty hotkeys (also rebuild map for that mode)
-          if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)   && this.difficulty !== "easy")   { this.difficulty = "easy";   this.setupSpawner(); }
-          if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)   && this.difficulty !== "normal") { this.difficulty = "normal"; this.setupSpawner(); }
-          if (Phaser.Input.Keyboard.JustDown(this.keys.THREE) && this.difficulty !== "hard")   { this.difficulty = "hard";   this.setupSpawner(); }
+          // Difficulty hotkeys (optional in-game)
+          if (this.justDown(this.keys?.ONE)   && this.difficulty !== "easy")   { this.difficulty = "easy";   this.setupSpawner(); }
+          if (this.justDown(this.keys?.TWO)   && this.difficulty !== "normal") { this.difficulty = "normal"; this.setupSpawner(); }
+          if (this.justDown(this.keys?.THREE) && this.difficulty !== "hard")   { this.difficulty = "hard";   this.setupSpawner(); }
 
           // HUD
           const hearts = "❤".repeat(this.playerHP) + "·".repeat(this.playerMaxHP - this.playerHP);
           this.hud.setText(
             `HP ${hearts}   Coins: ${this.coins}   Mode: ${this.difficulty.toUpperCase()}   ` +
-            `Map: ${this.cols}×${this.rows} @ ${this.TILE}px   x:${Math.floor(this.player.x)} y:${Math.floor(this.player.y)}`
+            `Map: ${this.cols}×${this.rows} @ ${this.TILE}px`
           );
         }
       }
 
+      // --------------------------- Game Config ---------------------------
       const config = {
         type: Phaser.AUTO,
         width: 960,
@@ -421,7 +506,8 @@ export default function PhaserGame() {
           arcade: { gravity: { y: 1200 }, debug: false }
         },
         scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, expandParent: false },
-        scene: [MainScene]
+        // Important: Menu is first → boots into Menu by default
+        scene: [MenuScene, MainScene]
       };
 
       if (containerRef.current && !destroyed) game = new Phaser.Game(config);
@@ -430,5 +516,16 @@ export default function PhaserGame() {
     return () => { destroyed = true; if (game) game.destroy(true); };
   }, []);
 
-  return <div ref={containerRef} style={{ width: "100%", aspectRatio: "16/9", borderRadius: 12, overflow: "hidden", boxShadow: "0 12px 30px rgba(0,0,0,.35)" }} />;
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        width: "100%",
+        aspectRatio: "16/9",
+        borderRadius: 12,
+        overflow: "hidden",
+        boxShadow: "0 12px 30px rgba(0,0,0,.35)"
+      }}
+    />
+  );
 }
