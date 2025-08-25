@@ -186,7 +186,8 @@ export default function PhaserGame() {
 
         preload() {
           const g = this.add.graphics();
-          g.fillStyle(0x90caf9, 1).fillRect(0, 0, 24, 36).generateTexture("playerTex", 24, 36).clear();
+          //g.fillStyle(0x90caf9, 1).fillRect(0, 0, 24, 36).generateTexture("playerTex", 24, 36).clear();
+          this.load.image("player", "/sprites/player.png"); // file in public/sprites/player.png
           g.fillStyle(0xff6b6b, 1).fillRect(0, 0, 24, 24).generateTexture("enemyTex", 24, 24).clear();
           g.fillStyle(0x3a3d46, 1).fillRect(0, 0, this.TILE, this.TILE).generateTexture("blockTex", this.TILE, this.TILE).clear();
           g.fillStyle(0xffd54f, 1).fillCircle(6, 6, 6).generateTexture("coinTex", 12, 12).clear();
@@ -206,10 +207,19 @@ export default function PhaserGame() {
           this.bg2 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgMid").setOrigin(0,0);
 
           // Player
-          this.player = this.physics.add.sprite(120, 120, "playerTex").setCollideWorldBounds(true);
-          this.player.body.setSize(24, 36);
-          this.player.setMaxVelocity(450, 1200);
-          this.player.setDragX(1800);
+            this.player = this.physics.add.sprite(120, 120, "player").setCollideWorldBounds(true);
+
+            // Option A: force the same on-screen size as before (24×36) and match physics body to display size
+            this.player.setDisplaySize(40, 40);
+            this.player.setScale(1.1);
+            this.player.body.setSize(this.player.displayWidth * 0.6, this.player.displayHeight * 0.9, true); // true => recenter body
+
+            // (Optional) Slightly narrower body for nicer platforming feel:
+            // this.player.body.setSize(this.player.displayWidth * 0.7, this.player.displayHeight, true);
+
+            this.player.setMaxVelocity(450, 1200);
+            this.player.setDragX(1800);
+
 
           // Attack hitbox
           this.attack = this.add.rectangle(0, 0, 48, 22, 0xffffff, 0.001);
