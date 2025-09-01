@@ -511,8 +511,8 @@ export default function PhaserGame() {
         }
         // ---------- Door ----------
         trySpawnDoor(x, y) {
-          const d = this.doors.create(x, y, "doorTex");
-          const g = this.mapSolids.create(x, y, null).setSize(this.TILE, this.TILE).setVisible(false);
+          const d = this.doors.create(x, y, "doorTex").setSize(this.TILE, this.TILE * 2);
+          const g = this.mapSolids.create(x, y, null).setSize(this.TILE, this.TILE * 2).setVisible(false);
           d.body.setAllowGravity(false);
           this.physics.add.overlap(this.player, d, (p, door) => {
             if (this.hasKey && !this.doorOpening) {
