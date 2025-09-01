@@ -149,8 +149,8 @@ export default function PhaserGame() {
 
         init(data) {
           // ----- WORLD SIZE -----
-          this.levelWidth  = 3200;
-          this.levelHeight = 720;
+          this.levelWidth  = 6200;
+          this.levelHeight = 4000;
           this.TILE = 40;
           this.cols = Math.floor(this.levelWidth / this.TILE);
           this.rows = Math.floor(this.levelHeight / this.TILE);
@@ -172,6 +172,7 @@ export default function PhaserGame() {
           this.maxAlive = 0;
 
           // map
+          this.groundFloorY = this.levelHeight - this.TILE * 2;
           this.mapSolids = null;
           this.allSpawnPoints = [];
           this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 };
@@ -182,6 +183,35 @@ export default function PhaserGame() {
 
           // spawn event
           this.spawnEvent = null;
+
+          // timers
+          this.passageRevealedTimer = 0;
+          this.hiddenBlockHitTimer = 0;
+          this.hasRevealedPassage = false;
+          this.hasHitHiddenBlock = false;
+          this.hasKey = false;
+          this.hasCollectedKey = false;
+          this.doorOpen = false;
+          this.doorOpening = false;
+          this.doorCloseTimer = 0;
+          this.gameOverTimer = 0;
+          this.gameOverDelay = 1800;
+          this.isGameOver = false;
+          this.lastScore = 0;
+          this.bestScore = 0;
+        
+          // refs to important game objects
+          this.player = null;
+          this.attack = null;
+          this.enemies = null;
+          this.treasures = null;
+          this.keysDoors = null;
+          this.doors = null;
+          this.hiddenPassages = null;
+          this.hiddenBlocks = null;
+          this.hud = null;
+          this.toast = null;
+
         }
 
         preload() {
@@ -194,9 +224,7 @@ export default function PhaserGame() {
           g.fillStyle(0x11131a, 1).fillRect(0, 0, 64, 64).generateTexture("bgDark", 64, 64).clear();
           g.fillStyle(0x171a24, 1).fillRect(0, 0, 64, 64).generateTexture("bgMid", 64, 64).destroy();
 
-          this.load.text("map_easy",   "/maps/easy.txt");
-          this.load.text("map_normal", "/maps/normal.txt");
-          this.load.text("map_hard",   "/maps/hard.txt");
+          this.load.text("map_level1",   "/maps/level1.txt");
         }
 
         create() {
@@ -205,6 +233,7 @@ export default function PhaserGame() {
           this.cameras.main.setBounds(0, 0, this.levelWidth, this.levelHeight);
           this.bg1 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgDark").setOrigin(0,0);
           this.bg2 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgMid").setOrigin(0,0);
+
 
           // Player
             this.player = this.physics.add.sprite(120, 120, "player").setCollideWorldBounds(true);
@@ -226,10 +255,32 @@ export default function PhaserGame() {
           this.physics.add.existing(this.attack);
           this.attack.body.setAllowGravity(false);
           this.attack.body.setEnable(false);
-          this.attack.setVisible(false);
+          this.attack.setVisible(true);
 
           // Enemies group
           this.enemies = this.physics.add.group();
+
+          // Treasure group 
+          this.treasures = this.physics.add.group();
+
+          // Key group
+          this.keysDoors = this.physics.add.group();
+          this.hasKey = false;
+          this.hasCollectedKey = false;
+
+          // Door group
+          this.doors = this.physics.add.group();
+          this.doorOpen = false;
+          this.doorOpening = false;
+          this.doorCloseTimer = 0;
+
+          // hidden blocks / gates group
+          this.hiddenPassages = this.physics.add.group();
+          this.hiddenBlocks = this.physics.add.group();
+          this.hasRevealedPassage = false;
+          this.hasHitHiddenBlock = false;
+          this.passageRevealedTimer = 0;
+          this.hiddenBlockHitTimer = 0;
 
           // Camera follow
           this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -240,11 +291,11 @@ export default function PhaserGame() {
             A: Phaser.Input.Keyboard.KeyCodes.A,
             D: Phaser.Input.Keyboard.KeyCodes.D,
             W: Phaser.Input.Keyboard.KeyCodes.W,
-            Z: Phaser.Input.Keyboard.KeyCodes.Z, // attack
+            F: Phaser.Input.Keyboard.KeyCodes.F, // attack
             X: Phaser.Input.Keyboard.KeyCodes.X, // dash
-            ONE:   Phaser.Input.Keyboard.KeyCodes.ONE,
-            TWO:   Phaser.Input.Keyboard.KeyCodes.TWO,
-            THREE: Phaser.Input.Keyboard.KeyCodes.THREE,
+            // ONE:   Phaser.Input.Keyboard.KeyCodes.ONE,
+            // TWO:   Phaser.Input.Keyboard.KeyCodes.TWO,
+            // THREE: Phaser.Input.Keyboard.KeyCodes.THREE,
             ESC:   Phaser.Input.Keyboard.KeyCodes.ESC
           });
 
@@ -302,21 +353,21 @@ export default function PhaserGame() {
             this.mapSolids,
             () => {
               if (this.player.body.blocked.down || this.player.body.touching.down) this.jumpCount = 0;
+              
             }
           );
           this.enemyMapCollider = this.physics.add.collider(this.enemies, this.mapSolids);
         }
 
         // ---------- Map building ----------
-        buildMapForDifficulty(mode) {
+        
+        buildMapForDifficulty(mode = "easy") {
           this.detachColliders();
           if (this.mapSolids) this.mapSolids.destroy(true);
           this.mapSolids = this.physics.add.staticGroup();
           this.allSpawnPoints = [];
 
-          let ascii = this.cache.text.get(
-            mode === "easy" ? "map_easy" : mode === "normal" ? "map_normal" : "map_hard"
-          );
+          let ascii = this.cache.text.get("map_level1");
           if (!ascii) ascii = this.makeDefaultAscii(this.cols, this.rows, mode);
           ascii = this.fixAsciiToBounds(ascii, this.cols, this.rows);
 
@@ -337,6 +388,21 @@ export default function PhaserGame() {
                 foundS = true;
               } else if (ch === "E") {
                 this.allSpawnPoints.push({ x, y: y - this.TILE * 2 });
+              } else if (ch == "T") { // optional: treasure 
+                this.trySpawnTreasure(x, y - 20);
+              } else if (ch == "_") { // no ground, if collided with, spawn back to start and take 1 damage
+                const killZone = this.mapSolids.create(x, y +30, null).setSize(this.TILE, this.TILE).setVisible(false);
+                killZone.refreshBody();
+                this.physics.add.overlap(this.player, killZone, () => this.respawnPlayer(), null, this);
+                this.physics.add.overlap(this.enemies, killZone, (e) => e.destroy, null, this);
+              } else if (ch == "K") { // key 
+                this.trySpawnKey(x, y - 20);
+              } else if (ch == "D") { //door
+                this.trySpawnDoor(x, y);
+              } else if (ch == "H") { // hidden block
+                this.trySpawnHiddenPassage(x, y - 20);
+            } else if (ch === "Q") { // hidden block
+                this.trySpawnHiddenBlock(x, y - 20);
               }
             }
           }
@@ -418,6 +484,119 @@ export default function PhaserGame() {
           e.setData("hp", 2);
           e.setData("coin", 1);
         }
+        
+        // ---------- Treasure ----------
+        trySpawnTreasure(x, y) {
+          const t = this.treasures.create(x, y, "coinTex");
+          t.body.setAllowGravity(false);
+          this.physics.add.overlap(this.player, t, (p, treasure) => {
+            // random amount between 1-5
+            this.coins += Phaser.Math.Between(1, 5);
+            const coin = this.add.image(treasure.x, treasure.y - 10, "coinTex");
+            this.tweens.add({ targets: coin, y: coin.y - 24, alpha: 0, duration: 450, onComplete: () => coin.destroy() });
+            treasure.destroy();
+          }, null, this);
+        }
+        // ---------- Key ----------
+        trySpawnKey(x, y) {
+          const k = this.keysDoors.create(x, y, "keyTex");
+          k.body.setAllowGravity(false);
+          this.physics.add.overlap(this.player, k, (p, key) => {
+            this.hasKey = true;
+            this.hasCollectedKey = true;
+            this.toast.setText("You got the key! Find the door.");
+            this.time.delayedCall(2000, () => this.toast.setText(""));
+            key.destroy();
+          }, null, this);
+        }
+        // ---------- Door ----------
+        trySpawnDoor(x, y) {
+          const d = this.doors.create(x, y, "doorTex");
+          const g = this.mapSolids.create(x, y, null).setSize(this.TILE, this.TILE).setVisible(false);
+          d.body.setAllowGravity(false);
+          this.physics.add.overlap(this.player, d, (p, door) => {
+            if (this.hasKey && !this.doorOpening) {
+              
+              this.doorOpening = true;
+              this.toast.setText("The door is opening...");
+              this.mapSolids.remove(g, true, true);
+              this.time.delayedCall(2000, () => {
+                this.doorOpen = true;
+                this.doorOpening = false;
+                
+
+                door.destroy();
+                this.hasKey = false;
+              }, this);
+            } else if (!this.hasKey) {
+              // no key - block player and show message
+              this.player.setVelocity(0, 0);
+              this.player.body.blocked.right = false;
+              this.player.body.blocked.left = false;
+              this.physics.world.collide(this.player, door);
+              door.body.immovable = true;
+              door.body.moves = false;
+              this.toast.setText("The door is locked. Find the key.");
+              this.time.delayedCall(2000, () => this.toast.setText(""), this);
+              
+            } else if (this.doorOpening) {
+              this.mapSolids.remove(g, true, true);
+            }
+          }, null, this);
+        }
+
+        // hidden blocks / gates can be added similarly
+        trySpawnHiddenPassage(x, y) {
+          // when player hits hidden passage, portal him to a new random exit point (H) that is not the same as entry
+          
+          const p = this.hiddenPassages.create(x, y, "hiddenPassageTex");
+          p.body.setAllowGravity(false);
+          this.hasRevealedPassage = true;
+          this.passageRevealedTimer = 3000;
+          this.physics.add.overlap(this.player, p, (pl, passage) => {
+            const exits = this.hiddenPassages.filter(pt => pt.x !== passage.x && pt.y !== passage.y);
+            if (exits.length > 0) {
+              const dest = Phaser.Math.RND.pick(exits);
+              pl.setPosition(dest.x, dest.y);
+              this.toast.setText("You found a hidden passage!");
+              this.time.delayedCall(2000, () => this.toast.setText(""));
+            }
+            passage.destroy();
+          }, null, this);
+
+        }
+        trySpawnHiddenBlock(x, y) {
+          // when player hits hidden block from below, reveal a coin or treasure
+          if (this.hasHitHiddenBlock) return;
+          const b = this.hiddenBlocks.create(x, y, "hiddenBlockTex");
+          b.body.setAllowGravity(false);
+          this.hasHitHiddenBlock = true;
+          this.hiddenBlockHitTimer = 3000;
+          this.physics.add.collider(this.player, b, (pl, block) => {
+            if (pl.body.blocked.up || pl.body.touching.up) {
+              this.trySpawnTreasure(block.x, block.y - 30);
+              this.toast.setText("You found a hidden treasure!");
+              this.time.delayedCall(2000, () => this.toast.setText(""));
+              block.destroy();
+            }
+          }, null, this);
+        }
+        // ---------- Destroy enemy safely ----------
+        destroyEnemy(enemy) {
+          // If enemy falls into a kill zone, remove it from physics and display immediately
+          if (enemy && enemy.active) {
+            enemy.disableBody(true, true);
+            enemy.destroy();
+          }
+        }
+        // ---------- Respawn / Game Over ----------
+        respawnPlayer() {
+          this.playerHP = Math.max(1, this.playerHP - 1);
+          this.player.setPosition(this.startPos.x, this.startPos.y);
+          this.player.setVelocity(0, 0);
+          this.invulnTimer = 1500;
+          this.player.setTint(0xffe082);
+        }
 
         // ---------- Game Over ----------
         gameOver() {
@@ -481,7 +660,7 @@ export default function PhaserGame() {
           }
 
           // Attack (use your active key here; you fixed earlier)
-          if (this.justDown(this.keys?.Z)) {
+          if (this.justDown(this.keys?.F)) {
             const px = this.player.x + this.facing * 30;
             const py = this.player.y + 2;
             this.attack.setPosition(px, py);
@@ -491,10 +670,14 @@ export default function PhaserGame() {
           }
 
           // Difficulty hotkeys (optional in-game)
-          if (this.justDown(this.keys?.ONE)   && this.difficulty !== "easy")   { this.difficulty = "easy";   this.setupSpawner(); }
-          if (this.justDown(this.keys?.TWO)   && this.difficulty !== "normal") { this.difficulty = "normal"; this.setupSpawner(); }
-          if (this.justDown(this.keys?.THREE) && this.difficulty !== "hard")   { this.difficulty = "hard";   this.setupSpawner(); }
+          // if (this.justDown(this.keys?.ONE)   && this.difficulty !== "easy")   { this.difficulty = "easy";   this.setupSpawner(); }
+          // if (this.justDown(this.keys?.TWO)   && this.difficulty !== "normal") { this.difficulty = "normal"; this.setupSpawner(); }
+          // if (this.justDown(this.keys?.THREE) && this.difficulty !== "hard")   { this.difficulty = "hard";   this.setupSpawner(); }
 
+          // check if enemys touches groundFloor (falling off map)
+          this.enemies.getChildren().forEach(e => {
+            if (e.y >= this.groundFloorY + 60) this.destroyEnemy(e);
+          });
           // HUD
           const hearts = "❤".repeat(this.playerHP) + "·".repeat(this.playerMaxHP - this.playerHP);
           this.hud.setText(
