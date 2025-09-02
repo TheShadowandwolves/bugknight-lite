@@ -1,4 +1,5 @@
 "use client";
+import { throwIfDisallowedDynamic } from "next/dist/server/app-render/dynamic-rendering";
 import { useEffect, useRef } from "react";
 
 export default function PhaserGame() {
@@ -221,18 +222,30 @@ export default function PhaserGame() {
           g.fillStyle(0xff6b6b, 1).fillRect(0, 0, 24, 24).generateTexture("enemyTex", 24, 24).clear();
           g.fillStyle(0x3a3d46, 1).fillRect(0, 0, this.TILE, this.TILE).generateTexture("blockTex", this.TILE, this.TILE).clear();
           g.fillStyle(0xffd54f, 1).fillCircle(6, 6, 6).generateTexture("coinTex", 12, 12).clear();
-          g.fillStyle(0x11131a, 1).fillRect(0, 0, 64, 64).generateTexture("bgDark", 64, 64).clear();
-          g.fillStyle(0x171a24, 1).fillRect(0, 0, 64, 64).generateTexture("bgMid", 64, 64).destroy();
-
+          // g.fillStyle(0x11131a, 1).fillRect(0, 0, 64, 64).generateTexture("bgDark", 64, 64).clear();
+          // g.fillStyle(0x171a24, 1).fillRect(0, 0, 64, 64).generateTexture("bgMid", 64, 64).destroy();
+          this.load.image("background", "/sprites/background4b.png");
           this.load.text("map_level1",   "/maps/level1.txt");
+
+          // tiles
+          this.load.image("top right corner", "/sprites/tiles/righttop.png");
+          this.load.image("leftop left corner", "/sprites/tiles/lefttop.png");
+          this.load.image("bottom right corner", "/sprites/tiles/rightbottom.png");
+          this.load.image("bottom left corner", "/sprites/tiles/leftbottom.png");
+          this.load.image("bottom edge", "/sprites/tiles/bottom.png");
+          this.load.image("top edge", "/sprites/tiles/top.png");
+          this.load.image("bottom dark edge", "/sprites/tiles/bottomdark.png");
+
         }
 
         create() {
           // World & camera
           this.physics.world.setBounds(0, 0, this.levelWidth, this.levelHeight);
           this.cameras.main.setBounds(0, 0, this.levelWidth, this.levelHeight);
-          this.bg1 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgDark").setOrigin(0,0);
-          this.bg2 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgMid").setOrigin(0,0);
+          // this.bg1 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgDark").setOrigin(0,0);
+          // this.bg2 = this.add.tileSprite(0, 0, this.levelWidth, this.scale.height, "bgMid").setOrigin(0,0);
+          // set custom background image (background)
+          this.bg3 = this.add.tileSprite(0, 0, this.levelWidth, this.levelHeight, "background").setOrigin(0,0).setScrollFactor(0);
 
 
           // Player
@@ -382,6 +395,29 @@ export default function PhaserGame() {
               const x = c * this.TILE + this.TILE / 2;
               if (ch === "x") {
                 const blk = this.mapSolids.create(x, y, "blockTex");
+                // testing purpose: use one texture sheet part for all blocks
+                blk.setVisible(false);
+                // this.add.image(x, y, 'sheet').setCrop(512 + 120, 96, 40, 40).setScale(1).setPosition(x-130, y+400);
+                const offsetY = 0; // adjust based on your sheet layout
+                const offsetX = 0; // adjust based on your sheet layout
+                const scale = 0.5;    // adjust based on your sheet layout
+                const scale2 = (0.7,0.6);
+                
+                // use texture sheet parts for blocks
+                const left = (c === 0) || (line[c-1] !== "x");
+                const right = (c === this.cols - 1) || (line[c+1] !== "x");
+                const top = (r === 0) || (lines[r-1][c] !== "x");
+                const bottom = (r === this.rows - 1) || (lines[r+1][c] !== "x");
+                if (top && left)   this.add.image(x, y, "leftop left corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
+                else if (top && right)  this.add.image(x, y, "top right corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
+                else if (bottom && left) this.add.image(x, y, "bottom left corner").setScale(scale).setPosition(offsetX + x, offsetY + y);
+                else if (bottom && right) this.add.image(x, y, "bottom right corner").setScale(scale).setPosition(offsetX + x, offsetY + y);
+                else if (top) this.add.image(x, y, "top edge").setScale(scale2).setPosition(offsetX + x, offsetY + y);
+                else if (bottom) this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);
+                else {this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);};
+              
+                
+
                 blk.refreshBody();
               } else if (ch === "S") {
                 this.startPos = { x, y: y - 20 };
@@ -620,8 +656,10 @@ export default function PhaserGame() {
 
         update(_time, delta) {
           const dt = delta;
-          this.bg1.tilePositionX = this.cameras.main.scrollX * 0.3;
-          this.bg2.tilePositionX = this.cameras.main.scrollX * 0.6;
+          // this.bg1.tilePositionX = this.cameras.main.scrollX * 0.3;
+          // this.bg2.tilePositionX = this.cameras.main.scrollX * 0.6;
+          this.bg3.tilePositionX = this.cameras.main.scrollX * 0.2;
+          this.bg3.scaleY = 1.2 + (this.cameras.main.scrollY / this.levelHeight) * 0.3;
 
           this.dashCooldown = Math.max(0, this.dashCooldown - dt);
           this.dashTimer = Math.max(0, this.dashTimer - dt);

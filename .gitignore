@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+public/sprites/background1.png
+public/sprites/background2.png
+public/sprites/background3.png
+public/sprites/background4a.png
+public/sprites/mainlev_build.png
+public/sprites/props1.png
+public/sprites/props2.png
+public/sprites/PSD/background.psd
+public/sprites/PSD/mainlev_build.psd
+public/sprites/PSD/props1.psd
+public/sprites/PSD/props2.psd
