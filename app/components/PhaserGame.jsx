@@ -236,6 +236,14 @@ export default function PhaserGame() {
           this.load.image("top edge", "/sprites/tiles/top.png");
           this.load.image("bottom dark edge", "/sprites/tiles/bottomdark.png");
 
+          this.load.image("doorTex", "/sprites/tiles/door.png");
+          this.load.image("door closed", "/sprites/tiles/doorclosed.png");
+
+          this.load.image('key0', '/sprites/tiles/keyGif/key_0.png');
+          this.load.image('key1', '/sprites/tiles/keyGif/key_1.png');
+          this.load.image('key2', '/sprites/tiles/keyGif/key_2.png');
+          this.load.image('key3', '/sprites/tiles/keyGif/key_3.png');
+
         }
 
         create() {
@@ -294,6 +302,17 @@ export default function PhaserGame() {
           this.hasHitHiddenBlock = false;
           this.passageRevealedTimer = 0;
           this.hiddenBlockHitTimer = 0;
+          // In create(): make a group and one overlap
+          this.hiddenPassages = this.physics.add.group({ allowGravity: false, immovable: true });
+          this.teleportLockMs = 0;
+
+          this.physics.add.overlap(
+            this.player,
+            this.hiddenPassages,
+            this.handleHiddenPassageOverlap,
+            null,
+            this
+          );
 
           // Camera follow
           this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -535,32 +554,76 @@ export default function PhaserGame() {
         }
         // ---------- Key ----------
         trySpawnKey(x, y) {
-          const k = this.keysDoors.create(x, y, "keyTex");
+          const k = this.keysDoors.create(x, y, "keyTex").setVisible(false);
+         
+            // Make a looping animation that cycles through the 4 textures
+          this.anims.create({
+            key: 'key_spin',
+            frames: [{ key: 'key0' }, { key: 'key1' }, { key: 'key2' }, { key: 'key3' }],
+            frameRate: 10,   // adjust speed
+            repeat: -1       // loop forever
+          });
+
+          // Physics group that can animate, but doesn’t fall
+          this.keysGroup = this.physics.add.group({ allowGravity: false, immovable: true });
+
+          // Spawn one (add as many as you need)
+          const key1 = this.keysGroup.create(x, y, 'key0'); // use first frame as base
+          key1.play('key_spin');
+          key1.setScale(1.25);             // make bigger if you like
+
+          // Player overlap → collect
+          this.physics.add.overlap(this.player, this.keysGroup, (_player, key) => {
+            this.keysCollected = (this.keysCollected || 0) + 1;
+            key.disableBody(true, true);   // hide + remove from physics
+
+            // tiny pop effect (optional)
+            const pop = this.add.image(key.x, key.y, 'key0').setScale(1.4);
+            this.tweens.add({ targets: pop, alpha: 0, y: pop.y - 10, duration: 200, onComplete: () => pop.destroy() });
+
+            // update HUD if you track it
+            this.hud?.setText?.(`Keys: ${this.keysCollected}`);
+          });
+
+
+
           k.body.setAllowGravity(false);
-          this.physics.add.overlap(this.player, k, (p, key) => {
+          this.physics.add.overlap(this.player, k, (p, keyi) => {
             this.hasKey = true;
             this.hasCollectedKey = true;
             this.toast.setText("You got the key! Find the door.");
             this.time.delayedCall(2000, () => this.toast.setText(""));
-            key.destroy();
+            // const keyImages = this.children.getAll().filter(child =>
+            //   child.texture && child.texture.key === "keyFlyAnim" && child.x === x && child.y === y
+            // );
+            // keyImages.forEach(img => img.setVisible(false));
+            
+            keyi.destroy();
           }, null, this);
         }
         // ---------- Door ----------
         trySpawnDoor(x, y) {
           const d = this.doors.create(x, y, "doorTex").setSize(this.TILE, this.TILE * 2);
+          this.add.image(x, y - 10, "doorTex").setScale(1);
           const g = this.mapSolids.create(x, y, null).setSize(this.TILE, this.TILE * 2).setVisible(false);
+          this.add.image(x, y - 10, "door closed").setScale(1);
           d.body.setAllowGravity(false);
           this.physics.add.overlap(this.player, d, (p, door) => {
-            if (this.hasKey && !this.doorOpening) {
+            if (this.hasKey) {
               
               this.doorOpening = true;
               this.toast.setText("The door is opening...");
               this.mapSolids.remove(g, true, true);
+              // hide image of closed door, show open door image
+                const doorImages = this.children.getAll().filter(child =>
+                child.texture && child.texture.key === "door closed" && child.x === x && child.y === y - 10
+                );
+                doorImages.forEach(img => img.setVisible(false));
               this.time.delayedCall(2000, () => {
                 this.doorOpen = true;
                 this.doorOpening = false;
-                
-
+                // this.add.image(x,y -10, "door closed").setScale(1);
+                this.time.delayedCall(2000, () => this.toast.setText(""), this);
                 door.destroy();
                 this.hasKey = false;
               }, this);
@@ -575,10 +638,34 @@ export default function PhaserGame() {
               this.toast.setText("The door is locked. Find the key.");
               this.time.delayedCall(2000, () => this.toast.setText(""), this);
               
-            } else if (this.doorOpening) {
-              this.mapSolids.remove(g, true, true);
-            }
+            } 
           }, null, this);
+        }
+        // Overlap handler (single place)
+        handleHiddenPassageOverlap(player, passage) {
+          if (this.teleportLockMs > 0) return;               // prevent instant re-trigger
+
+          // All other active portals
+          const exits = this.hiddenPassages
+            .getChildren()
+            .filter(obj => obj.active && obj !== passage);
+
+          if (exits.length === 0) return;
+
+          const dest = Phaser.Utils.Array.GetRandom(exits);
+
+          // Move the player to the destination portal.
+          // Nudge up a bit so you don't overlap its collider on the next frame.
+          const offsetY = (player.body?.height ?? 0) * 0.6 + 2;
+          player.setPosition(dest.x, dest.y - offsetY);
+
+          // brief lock and toast
+          this.teleportLockMs = 350;                         // ms
+          this.toast?.setText?.("You found a hidden passage!");
+          this.time.delayedCall(1200, () => this.toast?.setText?.(""));
+
+          // If portals are one-time use, remove the entry:
+          passage.destroy(true);
         }
 
         // hidden blocks / gates can be added similarly
@@ -586,19 +673,13 @@ export default function PhaserGame() {
           // when player hits hidden passage, portal him to a new random exit point (H) that is not the same as entry
           
           const p = this.hiddenPassages.create(x, y, "hiddenPassageTex");
+          p.setImmovable(true);
           p.body.setAllowGravity(false);
+          p.refreshBody();
           this.hasRevealedPassage = true;
           this.passageRevealedTimer = 3000;
-          this.physics.add.overlap(this.player, p, (pl, passage) => {
-            const exits = this.hiddenPassages.filter(pt => pt.x !== passage.x && pt.y !== passage.y);
-            if (exits.length > 0) {
-              const dest = Phaser.Math.RND.pick(exits);
-              pl.setPosition(dest.x, dest.y);
-              this.toast.setText("You found a hidden passage!");
-              this.time.delayedCall(2000, () => this.toast.setText(""));
-            }
-            passage.destroy();
-          }, null, this);
+          this.physics.add.collider(this.player, p);
+          this.physics.add.overlap(this.player, p, this.handleHiddenPassageOverlap, null, this);
 
         }
         trySpawnHiddenBlock(x, y) {
@@ -669,6 +750,10 @@ export default function PhaserGame() {
           const left = this.isDown(this.cursors?.left)  || this.isDown(this.keys?.A);
           const right= this.isDown(this.cursors?.right) || this.isDown(this.keys?.D);
           const onGround = this.player.body.blocked?.down || this.player.body.touching?.down;
+
+          // In update(time, delta): count down the cooldown
+          if (this.teleportLockMs > 0) this.teleportLockMs = Math.max(0, this.teleportLockMs - delta);
+
 
           // Move
           const runSpeed = 320;
