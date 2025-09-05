@@ -1,5 +1,6 @@
 // scenes/MainScene.js
 import Phaser from "phaser";
+import { Enemies } from "./enemies"; // adjust relative path if needed
 
 
 
@@ -80,6 +81,8 @@ export default class MainScene extends Phaser.Scene {
         //g.fillStyle(0x90caf9, 1).fillRect(0, 0, 24, 36).generateTexture("playerTex", 24, 36).clear();
         this.load.image("player", "/sprites/player.png"); // file in public/sprites/player.png
         g.fillStyle(0xff6b6b, 1).fillRect(0, 0, 24, 24).generateTexture("enemyTex", 24, 24).clear();
+        Enemies.preload(this);
+
         g.fillStyle(0x3a3d46, 1).fillRect(0, 0, this.TILE, this.TILE).generateTexture("blockTex", this.TILE, this.TILE).clear();
         g.fillStyle(0xffd54f, 1).fillCircle(6, 6, 6).generateTexture("coinTex", 12, 12).clear();
         // g.fillStyle(0x11131a, 1).fillRect(0, 0, 64, 64).generateTexture("bgDark", 64, 64).clear();
@@ -128,7 +131,15 @@ export default class MainScene extends Phaser.Scene {
     this.attack.setVisible(true);
 
     // Groups
-    this.enemies = this.physics.add.group();
+    Enemies.createAnims(this);
+        // Dynamic physics group (NOT static, NOT immovable)
+    this.enemies = this.physics.add.group({
+    allowGravity: true,
+    immovable: false,
+    collideWorldBounds: true
+    });
+    this.enemyMapCollider = this.physics.add.collider(this.enemies, this.mapSolids);
+
     this.treasures = this.physics.add.group();
     this.keysDoors = this.physics.add.group();
     this.doors = this.physics.add.group();
@@ -253,6 +264,10 @@ export default class MainScene extends Phaser.Scene {
       this.attack.setVisible(true);
       this.time.delayedCall(120, () => { this.attack.body.setEnable(false); this.attack.setVisible(true); });
     }
+
+    // AI ticks for all enemies
+    this.enemies.getChildren().forEach(e => e.updateAI?.(this.player));
+
 
     // fall cleanup & HUD
     this.enemies.getChildren().forEach(e => {
@@ -412,17 +427,27 @@ export default class MainScene extends Phaser.Scene {
 
           this.spawnEvent = this.time.addEvent({ delay: spawnEvery, loop: true, callback: this.trySpawnEnemy, callbackScope: this });
         }
-          trySpawnEnemy() {
-          if (this.enemies.countActive(true) >= this.maxAlive) return;
-          const near = [...this.activeSpawns].sort((a,b) => Math.abs(a.x - this.player.x) - Math.abs(b.x - this.player.x));
-          const choice = Phaser.Math.RND.pick(near.slice(0, Math.min(3, near.length)));
-          const e = this.enemies.create(choice.x, choice.y, "enemyTex");
-          e.setCollideWorldBounds(true).setBounce(0.1);
-          e.body.setSize(24, 24);
-          e.setVelocityX(Phaser.Math.Between(-100, 100));
-          e.setData("hp", 2);
-          e.setData("coin", 1);
+        trySpawnEnemy() {
+        if (this.enemies.countActive(true) >= this.maxAlive) return;
+
+        // pick a spawn point near the player (you already have this logic)
+        const near = [...this.activeSpawns].sort((a, b) => Math.abs(a.x - this.player.x) - Math.abs(b.x - this.player.x));
+        const choice = Phaser.Math.RND.pick(near.slice(0, Math.min(3, near.length)));
+
+        // pick a type based on current difficulty ("easy" | "normal" | "hard")
+        const typeKey = Enemies.pickType(this.difficulty);
+
+        // spawn the enemy
+        const enemy = Enemies.spawn(this, typeKey, choice.x, choice.y);
+
+        // add to your group so existing colliders/overlaps keep working
+        this.enemies.add(enemy);
+
+        // (Optional) immediately collide ground-walkers with your tile solids
+        // Your scene already has `this.enemyMapCollider = this.physics.add.collider(this.enemies, this.mapSolids)`
+        // If it's set up globally, you don't need per-enemy colliders here.
         }
+
 
         // ---------- Treasure ----------
         trySpawnTreasure(x, y) {
