@@ -123,12 +123,35 @@ export default class MainScene extends Phaser.Scene {
     this.player.setMaxVelocity(450, 1200);
     this.player.setDragX(1800);
 
-    // Attack hitbox
-    this.attack = this.add.rectangle(0, 0, 48, 22, 0xffffff, 0.1);
+    // Attack hitbox (physics body, no gravity)
+    this.attack = this.add.rectangle(0, 0, 52, 24, 0xffffff, 0.1);
     this.physics.add.existing(this.attack);
-    this.attack.body.setAllowGravity(false);
-    this.attack.body.setEnable(false);
-    this.attack.setVisible(true);
+    this.attack.body.setAllowGravity(false).setImmovable(true);
+    this.attack.body.enable = false;     // off by default
+    this.attack.setVisible(true);       // hide (turn true for debug)
+
+    // Reposition the hitbox BEFORE collisions each frame
+    const syncAttack = () => {
+    if (!this.attack.body.enable) return;
+
+    const reach = Math.max(28, this.player.displayWidth * 0.55);
+    const dt = this.game.loop.delta / 1000; // seconds
+    // small “lead” in the movement direction to handle dashes
+    const lead = Phaser.Math.Clamp(this.player.body.velocity.x * dt, -24, 24);
+
+    // Teleport body to new spot (no residual velocity)
+    this.attack.body.reset(
+        this.player.x + this.facing * reach + lead,
+        this.player.y + 2
+    );
+    };
+
+    // Option A (usually enough):
+    this.events.on(Phaser.Scenes.Events.PRE_UPDATE, syncAttack, this);
+
+    // Option B (if you still see lag, use physics worldstep instead):
+    // this.physics.world.on('worldstep', syncAttack, this);
+
 
     // Groups
     Enemies.createAnims(this);
@@ -179,7 +202,7 @@ export default class MainScene extends Phaser.Scene {
     this.buildMapForDifficulty(this.difficulty);
     this.attachColliders();
 
-    // Combat overlaps (copy from your file)
+    // Combat overlaps 
     this.physics.add.overlap(this.attack, this.enemies, (hitbox, enemy) => {
       if (!this.attack.body.enable || !enemy.active) return;
       const hp = (enemy.getData("hp") ?? 2) - 1;

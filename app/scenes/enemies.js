@@ -116,38 +116,38 @@ export const Enemies = {
     const bh = Math.floor(e.height * 0.85);
     e.body.setSize(bw, bh, true);
 
-    // AI update hook (optional)
+    // AI update hook
     e.updateAI = (player) => {
-  const ai = e.getData("ai");
-  if (ai === "hoverChase" && player?.active) {
-    const spd = e.getData("speed");
-    const dir = Math.sign(player.x - e.x) || 1;
-    e.setVelocityX(dir * spd);
-    const bob = Math.sin(scene.time.now / 400 + e.x * 0.01) * 25;
-    e.setVelocityY(bob);
-    e.flipX = dir < 0;
-    return;
-  }
+        const ai = e.getData("ai");
+        if (ai === "hoverChase" && player?.active) {
+            const spd = e.getData("speed");
+            const dir = Math.sign(player.x - e.x) || 1;
+            e.setVelocityX(dir * spd);
+            const bob = Math.sin(scene.time.now / 400 + e.x * 0.01) * 25;
+            e.setVelocityY(bob);
+            e.flipX = dir < 0;
+            return;
+        }
 
-  if (ai === "patrol") {
-    const spd = e.getData("speed");
-    const dirStored = e.getData("dir") || 1;
+        if (ai === "patrol") {
+            const spd = e.getData("speed");
+            const dirStored = e.getData("dir") || 1;
 
-    // If stuck at 0, push again in stored direction
-    if (Math.abs(e.body.velocity.x) < 5 && e.body.blocked.down) {
-      const dir = dirStored || (Phaser.Math.Between(0, 1) ? 1 : -1);
-      e.setVelocityX(dir * spd);
-      e.setData("dir", dir);
-    }
+            // If stuck at 0, push again in stored direction
+            if (Math.abs(e.body.velocity.x) < 5 && e.body.blocked.down) {
+            const dir = dirStored || (Phaser.Math.Between(0, 1) ? 1 : -1);
+            e.setVelocityX(dir * spd);
+            e.setData("dir", dir);
+            }
 
-    // On hitting walls, flip direction
-    if (e.body.blocked.left)  { e.setVelocityX(+spd); e.setData("dir", +1); }
-    if (e.body.blocked.right) { e.setVelocityX(-spd); e.setData("dir", -1); }
+            // On hitting walls, flip direction
+            if (e.body.blocked.left)  { e.setVelocityX(+spd); e.setData("dir", +1); }
+            if (e.body.blocked.right) { e.setVelocityX(-spd); e.setData("dir", -1); }
 
-    // Face travel direction
-    e.flipX = e.body.velocity.x < 0;
-  }
-};
+            // Face travel direction
+            e.flipX = e.body.velocity.x < 0;
+        }
+    };
 
 
     return e;
