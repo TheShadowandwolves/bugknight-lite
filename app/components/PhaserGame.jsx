@@ -15,6 +15,7 @@ export default function PhaserGame() {
     const { default: MenuScene } = await import("../scenes/MenuScene");
     const { default: MainScene } = await import("../scenes/MainScene");
     const { default: PauseMenuScene } = await import("../scenes/PauseMenuScene"); 
+    const { default: BossLevelScene } = await import("../scenes/BossLevelScene"); 
       const config = {
         type: Phaser.AUTO,
         width: 960,
@@ -27,7 +28,7 @@ export default function PhaserGame() {
         },
         pixelArt: true,
         scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, expandParent: false },
-        scene: [MenuScene, MainScene, PauseMenuScene],   // Menu first → boots into menu
+        scene: [MenuScene, MainScene, PauseMenuScene, BossLevelScene],   // Menu first → boots into menu
       };
 
       if (!destroyed && containerRef.current) game = new Phaser.Game(config);

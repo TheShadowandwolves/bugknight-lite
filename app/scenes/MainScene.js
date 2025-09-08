@@ -19,8 +19,31 @@ export default class MainScene extends Phaser.Scene {
     return fallback;
   }
 }
+    loadCheckpoint() {
+        try {
+            const raw = this.safeGet("bk_checkpoint", null);
+            return raw ? JSON.parse(raw) : null;
+        } catch { return null; }
+    }
+    saveCheckpoint(cp) { 
+        this.safeSet("bk_checkpoint", JSON.stringify(cp)); 
+        
+    }
+    // persisted flags
+    isBossCleared() { try { return localStorage.getItem("bk_boss_cleared") === "1"; } catch { return false; } }
+    setBossCleared(pos) {
+    try {
+        localStorage.setItem("bk_boss_cleared", "1");
+        if (pos) localStorage.setItem("bk_boss_gate_pos", JSON.stringify(pos));
+    } catch {}
+    }
+    loadBossGatePos() {
+    try { const s = localStorage.getItem("bk_boss_gate_pos"); return s ? JSON.parse(s) : null; } catch { return null; }
+    }
+
   // ===== lifecycle =====
   init(data) {
+    this.data = data || {};
     // world size
     this.levelWidth  = 6200;      // your values
     this.levelHeight = 4000;
@@ -32,14 +55,18 @@ export default class MainScene extends Phaser.Scene {
 
     // state (from your current file)
     this.playerMaxHP = 5;
-    this.playerHP = this.playerMaxHP;
+    this.playerHP = (typeof data?.playerHP === "number") ? Math.max(1, Math.min(this.playerMaxHP, data.playerHP)) : this.playerMaxHP;
     this.facing = 1;
     this.jumpCount = 0; this.maxJumps = 2;
     this.dashTimer = 0; this.dashCooldown = 0;
     this.invulnTimer = 0;
 
+    this.bossCleared = !!data?.bossCleared || this.isBossCleared();
+    this.bossGatePos = data?.bossGatePos || this.loadBossGatePos();
+    this.inBossTransition = false;   // guard to prevent double launch
+
     // score & difficulty
-    this.coins = 0;
+    this.coins = data?.coins ?? 0;
     const saved = this.safeGet("bk_difficulty", null);
     // later when setting:
     this.difficulty = data?.difficulty ?? saved ?? "easy";
@@ -74,12 +101,42 @@ export default class MainScene extends Phaser.Scene {
     this.hiddenPassages = null; this.hiddenBlocks = null;
     this.hud = null; this.toast = null;
     this.teleportLockMs = 0;
+
+    // call in init:
+    this.returnFromBoss = !!data?.returnFromBoss;
+    this.checkpoint = data?.checkpoint || this.loadCheckpoint(); 
+
   }
 
-  preload() {
+    setCheckpointFromPlayer() {
+        // small upward offset so you don't spawn intersecting tiles
+        const cp = { x: this.player.x + 30, y: this.player.y - 1, difficulty: this.difficulty };
+        this.checkpoint = cp;
+        this.saveCheckpoint(cp);
+        this.toast?.setText?.("Checkpoint saved");
+        this.time.delayedCall(900, () => this.toast?.setText?.(""));
+    }
+
+
+
+    preload() {
         const g = this.add.graphics();
         //g.fillStyle(0x90caf9, 1).fillRect(0, 0, 24, 36).generateTexture("playerTex", 24, 36).clear();
         this.load.image("player", "/sprites/player.png"); // file in public/sprites/player.png
+        this.load.spritesheet('playerWalkR', '/sprites/player_walk_right.png', { frameWidth: 40, frameHeight: 40 });
+        this.load.spritesheet('playerWalkL', '/sprites/player_walk_left.png',  { frameWidth: 40, frameHeight: 40 });
+        this.load.image('playerJump', '/sprites/player_jump.png');
+        this.load.spritesheet('playerAttack', '/sprites/player_attack_sheet.png', { frameWidth: 40, frameHeight: 40 });
+
+        if (!this.textures.exists("monumentTex")) {
+            const g = this.add.graphics();
+            g.fillStyle(0x4b6ea9, 1).fillRoundedRect(0, 0, this.TILE*0.8, this.TILE*1.2, 6)
+            .lineStyle(2, 0xaad1ff, 1).strokeRoundedRect(0, 0, this.TILE*0.8, this.TILE*1.2, 6)
+            .generateTexture("monumentTex", this.TILE*0.8, this.TILE*1.2)
+            .destroy();
+        }
+
+
         g.fillStyle(0xff6b6b, 1).fillRect(0, 0, 24, 24).generateTexture("enemyTex", 24, 24).clear();
         Enemies.preload(this);
 
@@ -122,6 +179,14 @@ export default class MainScene extends Phaser.Scene {
     this.player.body.setSize(this.player.displayWidth * 0.6, this.player.displayHeight * 0.9, true);
     this.player.setMaxVelocity(450, 1200);
     this.player.setDragX(1800);
+
+    this.anims.create({ key: 'walkR', frames: this.anims.generateFrameNumbers('playerWalkR', { start: 0, end: 1 }), frameRate: 8, repeat: -1 });
+    this.anims.create({ key: 'walkL', frames: this.anims.generateFrameNumbers('playerWalkL', { start: 0, end: 1 }), frameRate: 8, repeat: -1 });
+    this.anims.create({ key: 'attackR', frames: this.anims.generateFrameNumbers('playerAttack', { start: 0, end: 5 }), frameRate: 18, repeat: 0 });
+
+
+    // boss scenes
+    this.bossGates = this.physics.add.group({ allowGravity: false, immovable: true });
 
     // Attack hitbox (physics body, no gravity)
     this.attack = this.add.rectangle(0, 0, 52, 24, 0xffffff, 0.1);
@@ -202,6 +267,33 @@ export default class MainScene extends Phaser.Scene {
     this.buildMapForDifficulty(this.difficulty);
     this.attachColliders();
 
+    // If we just came back from the boss, drop the player at the last checkpoint
+    if (this.returnFromBoss && this.checkpoint) {
+        this.player.setPosition(this.checkpoint.x, this.checkpoint.y);
+        this.player.setVelocity(0, 0);
+        this.cameras.main.centerOn(this.checkpoint.x, this.checkpoint.y);
+        this.toast?.setText?.("Returned to last checkpoint");
+        this.time.delayedCall(900, () => this.toast?.setText?.(""));
+    }
+    if (this.returnFromBoss && this.data?.bossCleared) {
+        // Persist cleared state and remember gate position for future loads
+        this.bossCleared = true;
+        this.setBossCleared(this.data.bossGatePos || this.bossGatePos);
+        this.bossGatePos = this.data.bossGatePos || this.bossGatePos;
+
+        // remove all boss gates
+        this.bossGates.clear(true, true);
+
+        // draw a monument where that gate was (decorative blocker)
+        const p = this.bossGatePos;
+        if (p) {
+            const blocker = this.mapSolids.create(p.x, p.y - 10, null).setSize(this.TILE*0.8, this.TILE*1.2).setVisible(false);
+            blocker.refreshBody();
+            this.add.image(p.x, p.y - 10, "monumentTex").setOrigin(0.5, 0.9);
+        }
+    }
+
+
     // Combat overlaps 
     this.physics.add.overlap(this.attack, this.enemies, (hitbox, enemy) => {
       if (!this.attack.body.enable || !enemy.active) return;
@@ -218,11 +310,34 @@ export default class MainScene extends Phaser.Scene {
         enemy.destroy();
       }
     });
+    // Boss gate overlap
+this.physics.add.overlap(this.player, this.bossGates, (player, gate) => {
+    if (this.inBossTransition) return;
+    this.inBossTransition = true;
+
+    const gatePos = gate?.getData("gatePos") || { x: gate.x, y: gate.y };
+
+    // save checkpoint and gate position
+    this.setCheckpointFromPlayer();
+    this.safeSet("bk_boss_gate_pos", JSON.stringify(gatePos));
+
+    // launch boss scene
+    this.scene.start("BossLevel", {
+        from: this.scene.key,
+        difficulty: this.difficulty,
+        coins: this.coins,
+        checkpoint: this.checkpoint,
+        playerHP: this.playerHP,
+        bossGatePos: gatePos
+    });
+    this.scene.stop(this.scene.key);
+    });
+
 
     // Damage to player (copy)
     this.physics.add.overlap(this.player, this.enemies, () => {
       if (this.invulnTimer > 0) return;
-      this.playerHP = Math.max(0, this.playerHP - 1);
+      this.playerHP = this.playerHP - 1;
       this.invulnTimer = 800;
       this.player.setTint(0xffe082);
       this.player.setVelocity(-this.facing * 240, -200);
@@ -258,17 +373,21 @@ export default class MainScene extends Phaser.Scene {
     if (this.dashTimer > 0) {
       // keep momentum
     } else if (left && !right) {
-      this.player.setVelocityX(-runSpeed); this.facing = -1;
+        this.player.play('walkL', true);
+        this.player.setVelocityX(-runSpeed); this.facing = -1;
     } else if (right && !left) {
-      this.player.setVelocityX(runSpeed); this.facing = 1;
+        this.player.play('walkR', true);
+        this.player.setVelocityX(runSpeed); this.facing = 1;
     } else {
-      this.player.setVelocityX(0);
+        this.player.anims.stop();
+        this.player.setVelocityX(0);
     }
 
     const jumpPressed = this.justDown(this.cursors?.up) || this.justDown(this.keys?.W);
     if (jumpPressed) {
-      if (onGround) { this.jumpCount = 1; this.player.setVelocityY(-470); }
-      else if (this.jumpCount < this.maxJumps) { this.jumpCount++; this.player.setVelocityY(-450); }
+        if (!onGround) this.player.setTexture('playerJump');
+        if (onGround) { this.jumpCount = 1; this.player.setVelocityY(-470); }
+        else if (this.jumpCount < this.maxJumps) { this.jumpCount++; this.player.setVelocityY(-450); }
     }
 
     if (this.justDown(this.keys?.X) && this.dashCooldown === 0) {
@@ -280,6 +399,7 @@ export default class MainScene extends Phaser.Scene {
 
     if (this.justDown(this.keys?.SPACE)) {
       if (this.dashTimer > 0) return;
+    //   this.player.play('attackR');   // lock to attack until complete if you want
       const px = this.player.x + this.facing * 30;
       const py = this.player.y + 2;
       this.attack.setPosition(px, py);
@@ -298,7 +418,7 @@ export default class MainScene extends Phaser.Scene {
     });
 
     const hearts = "❤".repeat(this.playerHP) + "·".repeat(this.playerMaxHP - this.playerHP);
-    this.hud.setText(`HP ${hearts}   Coins: ${this.coins}   Mode: ${this.difficulty.toUpperCase()}   Map: ${this.cols}×${this.rows} @ ${this.TILE}px`);
+    this.hud.setText(`HP ${hearts}   Coins: ${this.coins}   Mode: ${this.difficulty.toUpperCase()}   Map: ${this.cols}*${this.rows} @ ${this.TILE}px`);
   }
 
   // ===== helpers you already have – paste bodies from your file =====
@@ -354,8 +474,8 @@ export default class MainScene extends Phaser.Scene {
             const bottom = (r === this.rows - 1) || (lines[r+1][c] !== "x");
             if (top && left)   this.add.image(x, y, "leftop left corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
             else if (top && right)  this.add.image(x, y, "top right corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
-            else if (bottom && left) this.add.image(x, y, "bottom left corner").setScale(scale).setPosition(offsetX + x, offsetY + y);
-            else if (bottom && right) this.add.image(x, y, "bottom right corner").setScale(scale).setPosition(offsetX + x, offsetY + y);
+            else if (bottom && left) this.add.image(x, y, "bottom left corner").setScale(scale * 0.9).setPosition(offsetX + x, offsetY + y);
+            else if (bottom && right) this.add.image(x, y, "bottom right corner").setScale(scale * 0.9).setPosition(offsetX + x, offsetY + y);
             else if (top) this.add.image(x, y, "top edge").setScale(scale2).setPosition(offsetX + x, offsetY + y);
             else if (bottom) this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);
             else {this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);};
@@ -383,7 +503,20 @@ export default class MainScene extends Phaser.Scene {
             this.trySpawnHiddenPassage(x, y - 20);
         } else if (ch === "Q") { // hidden block
             this.trySpawnHiddenBlock(x, y - 20);
+            } else if (ch === "B") {
+                const gx = x, gy = y;
+                if (this.bossCleared) {
+                    // gate replaced by monument (decorative)
+                    const m = this.mapSolids.create(gx, gy - 10, null).setSize(this.TILE*0.8, this.TILE*1.2).setVisible(false);
+                    this.add.image(gx, gy - 10, "monumentTex").setOrigin(0.5, 0.9);
+                    m.refreshBody();
+                } else {
+                    const g = this.bossGates.create(gx, gy, null);
+                    g.body.setSize(this.TILE*0.6, this.TILE*0.8); // invisible sensor
+                    g.setData("gatePos", { x: gx, y: gy });
+                }
             }
+
         }
         }
         if (!foundS) this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 };
@@ -433,16 +566,15 @@ export default class MainScene extends Phaser.Scene {
           // ---------- Spawner ----------
         setupSpawner() {
           if (this.spawnEvent) { this.spawnEvent.remove(false); this.spawnEvent = null; }
-          this.buildMapForDifficulty(this.difficulty);
-          this.attachColliders();
+        //   this.buildMapForDifficulty(this.difficulty);
+        //   this.attachColliders();
 
           let spawnEvery = 1500;
-          let numSpawnPoints = 1;
-          this.maxAlive = 6;
+          let numSpawnPoints = this.allSpawnPoints.length;
 
-          if (this.difficulty === "easy") { spawnEvery = 1800; numSpawnPoints = 1; this.maxAlive = 4; }
-          else if (this.difficulty === "normal") { spawnEvery = 1200; numSpawnPoints = Math.min(2, this.allSpawnPoints.length); this.maxAlive = 8; }
-          else { spawnEvery = 800; numSpawnPoints = Math.min(5, this.allSpawnPoints.length); this.maxAlive = 16; }
+          if (this.difficulty === "easy") { spawnEvery = 1800; }
+          else if (this.difficulty === "normal") { spawnEvery = 1200;}
+          else { spawnEvery = 800; }
 
           this.activeSpawns = Phaser.Utils.Array.Shuffle([...this.allSpawnPoints]).slice(0, numSpawnPoints);
           this.toast.setText(`Mode: ${this.difficulty} — spawns: ${numSpawnPoints}`);
@@ -451,7 +583,7 @@ export default class MainScene extends Phaser.Scene {
           this.spawnEvent = this.time.addEvent({ delay: spawnEvery, loop: true, callback: this.trySpawnEnemy, callbackScope: this });
         }
         trySpawnEnemy() {
-        if (this.enemies.countActive(true) >= this.maxAlive) return;
+        // if (this.enemies.countActive(true) >= this.maxAlive) return;
 
         // pick a spawn point near the player (you already have this logic)
         const near = [...this.activeSpawns].sort((a, b) => Math.abs(a.x - this.player.x) - Math.abs(b.x - this.player.x));
@@ -640,7 +772,11 @@ export default class MainScene extends Phaser.Scene {
         }
         // ---------- Respawn / Game Over ----------
         respawnPlayer() {
-          this.playerHP = Math.max(1, this.playerHP - 1);
+          this.playerHP = this.playerHP - 1;
+          if (this.playerHP <= 0) {
+            this.gameOver();
+            return;
+          }
           this.player.setPosition(this.startPos.x, this.startPos.y);
           this.player.setVelocity(0, 0);
           this.invulnTimer = 1500;
@@ -660,6 +796,10 @@ export default class MainScene extends Phaser.Scene {
           if (this.spawnEvent) { this.spawnEvent.remove(false); this.spawnEvent = null; }
           this.detachColliders?.();
           this.enemies?.clear(true, true);
+          this.data = null;
+          this.isBossCleared = false;
+          this.inBossTransition = false;
+          this.scene.stop(this.scene.key);
           this.scene.start("Menu", { lastScore: this.coins, difficulty: this.difficulty, fromGameOver: true });
         }
 }
