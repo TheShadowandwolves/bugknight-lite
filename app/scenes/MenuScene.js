@@ -95,8 +95,14 @@ export default class MenuScene extends Phaser.Scene {
   activateSelection() {
     const label = this.options[this.selectedIndex];
     if (label === "Play") {
-      this.safeSet("bk_difficulty", this.difficulty);
-      this.scene.start("MainScene", { difficulty: this.difficulty });
+        // inside "Play" branch of activateSelection()
+        try {
+            localStorage.removeItem("bk_boss_cleared_v2");
+            localStorage.removeItem("bk_checkpoint");
+            localStorage.removeItem("bk_boss_gate_pos");
+        } catch {}
+        this.scene.start("MainScene", { difficulty: this.difficulty });
+
     } else if (label === "Score") {
       this.toggleScorePanel(true);
     } else if (label === "Settings") {

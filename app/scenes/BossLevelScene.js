@@ -48,6 +48,7 @@ safeGet(k, fallback = null) { try { return localStorage.getItem(k) ?? fallback; 
     this.bossMaxHP = 30;
     this.bossState = "idle";
     this.bossAttackCd = 0;
+    this.bossGatePos = data?.bossGatePos || null;
 
     // helpers
     this.playerMapCollider = null;

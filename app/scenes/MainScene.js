@@ -30,7 +30,9 @@ export default class MainScene extends Phaser.Scene {
         
     }
     // persisted flags
-    isBossCleared() { try { return localStorage.getItem("bk_boss_cleared") === "1"; } catch { return false; } }
+    isBossCleared() { try { return this.safeGetInt("bk_boss_cleared", 0) === 1;
+
+    } catch { return false; } }
     setBossCleared(pos) {
     try {
         localStorage.setItem("bk_boss_cleared", "1");
@@ -39,6 +41,28 @@ export default class MainScene extends Phaser.Scene {
     }
     loadBossGatePos() {
     try { const s = localStorage.getItem("bk_boss_gate_pos"); return s ? JSON.parse(s) : null; } catch { return null; }
+    }
+
+    
+    // ---- per-gate cleared store: { [mapKey]: [ "c,r", ... ] }
+    loadClearedMap(){
+    try { return JSON.parse(this.safeGet("bk_boss_cleared_v2","{}")) || {}; } catch { return {}; }
+    }
+    saveClearedMap(obj){ this.safeSet("bk_boss_cleared_v2", JSON.stringify(obj)); }
+    isGateCleared(mapKey, tileId){
+    const m = this.loadClearedMap(); return !!(m[mapKey]?.includes(tileId));
+    }
+    markGateCleared(mapKey, tileId){
+    const m = this.loadClearedMap(); if(!m[mapKey]) m[mapKey]=[];
+    if(!m[mapKey].includes(tileId)) m[mapKey].push(tileId);
+    this.saveClearedMap(m);
+    }
+    clearAllProgress(){  // call on "New Game"
+    try {
+        localStorage.removeItem("bk_boss_cleared_v2");
+        localStorage.removeItem("bk_checkpoint");
+        localStorage.removeItem("bk_boss_gate_pos");
+    } catch {}
     }
 
   // ===== lifecycle =====
@@ -104,7 +128,9 @@ export default class MainScene extends Phaser.Scene {
 
     // call in init:
     this.returnFromBoss = !!data?.returnFromBoss;
-    this.checkpoint = data?.checkpoint || this.loadCheckpoint(); 
+    this.checkpoint = data?.checkpoint || null;
+    this.inBossTransition = false;                 // prevents double launch
+    this.bossGatePos = data?.bossGatePos || null;  // {mapKey, tileId, x, y} from Boss scene
 
   }
 
@@ -275,23 +301,40 @@ export default class MainScene extends Phaser.Scene {
         this.toast?.setText?.("Returned to last checkpoint");
         this.time.delayedCall(900, () => this.toast?.setText?.(""));
     }
-    if (this.returnFromBoss && this.data?.bossCleared) {
-        // Persist cleared state and remember gate position for future loads
-        this.bossCleared = true;
-        this.setBossCleared(this.data.bossGatePos || this.bossGatePos);
-        this.bossGatePos = this.data.bossGatePos || this.bossGatePos;
+    // if (this.returnFromBoss && this.data?.bossCleared) {
+    //     // Persist cleared state and remember gate position for future loads
+    //     this.bossCleared = true;
+    //     this.setBossCleared(this.data.bossGatePos || this.bossGatePos);
+    //     this.bossGatePos = this.data.bossGatePos || this.bossGatePos;
 
-        // remove all boss gates
-        this.bossGates.clear(true, true);
+    //     // remove all boss gates
+    //     this.bossGates.clear(true, true);
 
-        // draw a monument where that gate was (decorative blocker)
-        const p = this.bossGatePos;
-        if (p) {
-            const blocker = this.mapSolids.create(p.x, p.y - 10, null).setSize(this.TILE*0.8, this.TILE*1.2).setVisible(false);
-            blocker.refreshBody();
-            this.add.image(p.x, p.y - 10, "monumentTex").setOrigin(0.5, 0.9);
+    //     // draw a monument where that gate was (decorative blocker)
+    //     const p = this.bossGatePos;
+    //     if (p) {
+    //         const blocker = this.mapSolids.create(p.x, p.y - 10, null).setSize(this.TILE*0.8, this.TILE*1.2).setVisible(false);
+    //         blocker.refreshBody();
+    //         this.add.image(p.x, p.y - 10, "monumentTex").setOrigin(0.5, 0.9);
+    //     }
+    // }
+    if (this.returnFromBoss && this.data?.bossCleared && this.data?.bossGatePos) {
+        const { mapKey, tileId, x, y } = this.data.bossGatePos;
+        // Persist clear
+        this.markGateCleared(mapKey, tileId);
+
+        // Remove only that gate from the group
+        if (this.bossGates) {
+            const match = this.bossGates.getChildren().find(g => (g.getData("gatePos")?.tileId === tileId));
+            match?.destroy();
         }
-    }
+
+        // Place a monument (static blocker)
+        const blocker = this.mapSolids.create(x, y - 10, null).setVisible(false);
+        blocker.setSize(this.TILE*0.8, this.TILE*1.2); blocker.refreshBody();
+        this.add.image(x, y - 10, "monumentTex").setOrigin(0.5, 0.9);
+        }
+
 
 
     // Combat overlaps 
@@ -311,27 +354,25 @@ export default class MainScene extends Phaser.Scene {
       }
     });
     // Boss gate overlap
-this.physics.add.overlap(this.player, this.bossGates, (player, gate) => {
-    if (this.inBossTransition) return;
-    this.inBossTransition = true;
+this.physics.add.overlap(this.player, this.bossGates, (_pl, gate) => {
+  if (this.inBossTransition) return;
+  this.inBossTransition = true;
 
-    const gatePos = gate?.getData("gatePos") || { x: gate.x, y: gate.y };
+  const gatePos = gate.getData("gatePos") || { mapKey: this.currentMapKey, tileId: "?", x: gate.x, y: gate.y };
+  this.setCheckpointFromPlayer();
+  this.safeSet("bk_boss_gate_pos", JSON.stringify(gatePos)); // optional
 
-    // save checkpoint and gate position
-    this.setCheckpointFromPlayer();
-    this.safeSet("bk_boss_gate_pos", JSON.stringify(gatePos));
+  this.scene.start("BossLevel", {
+    from: this.scene.key,
+    difficulty: this.difficulty,
+    coins: this.coins,
+    checkpoint: this.checkpoint,
+    playerHP: this.playerHP,
+    bossGatePos: gatePos,
+  });
+  this.scene.stop(this.scene.key);
+});
 
-    // launch boss scene
-    this.scene.start("BossLevel", {
-        from: this.scene.key,
-        difficulty: this.difficulty,
-        coins: this.coins,
-        checkpoint: this.checkpoint,
-        playerHP: this.playerHP,
-        bossGatePos: gatePos
-    });
-    this.scene.stop(this.scene.key);
-    });
 
 
     // Damage to player (copy)
@@ -445,6 +486,7 @@ this.physics.add.overlap(this.player, this.bossGates, (player, gate) => {
         this.allSpawnPoints = [];
 
         let ascii = this.cache.text.get("map_level1");
+        this.currentMapKey = "map_level1";
         if (!ascii) ascii = this.makeDefaultAscii(this.cols, this.rows, mode);
         ascii = this.fixAsciiToBounds(ascii, this.cols, this.rows);
 
@@ -504,16 +546,21 @@ this.physics.add.overlap(this.player, this.bossGates, (player, gate) => {
         } else if (ch === "Q") { // hidden block
             this.trySpawnHiddenBlock(x, y - 20);
             } else if (ch === "B") {
+               const tileId = `${c},${r}`;          // per-tile id
                 const gx = x, gy = y;
-                if (this.bossCleared) {
-                    // gate replaced by monument (decorative)
-                    const m = this.mapSolids.create(gx, gy - 10, null).setSize(this.TILE*0.8, this.TILE*1.2).setVisible(false);
+
+                if (this.isGateCleared(this.currentMapKey, tileId)) {
+                    // Already cleared -> show a monument (blocks re-entry)
+                    const blocker = this.mapSolids.create(gx, gy - 10, null).setVisible(false);
+                    blocker.setSize(this.TILE*0.8, this.TILE*1.2); blocker.refreshBody();
                     this.add.image(gx, gy - 10, "monumentTex").setOrigin(0.5, 0.9);
-                    m.refreshBody();
                 } else {
+                    if (!this.bossGates) {
+                    this.bossGates = this.physics.add.group({ allowGravity:false, immovable:true });
+                    }
                     const g = this.bossGates.create(gx, gy, null);
-                    g.body.setSize(this.TILE*0.6, this.TILE*0.8); // invisible sensor
-                    g.setData("gatePos", { x: gx, y: gy });
+                    g.body.setSize(this.TILE*0.6, this.TILE*0.8);
+                    g.setData("gatePos", { mapKey: this.currentMapKey, tileId, x: gx, y: gy });
                 }
             }
 
@@ -796,9 +843,6 @@ this.physics.add.overlap(this.player, this.bossGates, (player, gate) => {
           if (this.spawnEvent) { this.spawnEvent.remove(false); this.spawnEvent = null; }
           this.detachColliders?.();
           this.enemies?.clear(true, true);
-          this.data = null;
-          this.isBossCleared = false;
-          this.inBossTransition = false;
           this.scene.stop(this.scene.key);
           this.scene.start("Menu", { lastScore: this.coins, difficulty: this.difficulty, fromGameOver: true });
         }
