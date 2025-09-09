@@ -1,6 +1,8 @@
 // scenes/BossLevelScene.js
 import Phaser from "phaser";
 import { BossEnemies } from "./BossEnemies";
+import { MapBuilder } from "./MapBuilder";
+
 
 
 export default class BossLevelScene extends Phaser.Scene {
@@ -64,7 +66,7 @@ safeGet(k, fallback = null) { try { return localStorage.getItem(k) ?? fallback; 
   preload() {
     // Map text
     this.load.text("boss_map", "/maps/BossLevel.txt");
-
+    MapBuilder.preload(this, { withTiles: true });
     // Player fallback art if not already cached
     if (!this.textures.exists("player")) {
       this.load.image("player", "/sprites/player.png");
@@ -100,7 +102,20 @@ safeGet(k, fallback = null) { try { return localStorage.getItem(k) ?? fallback; 
 
   create() {
     // Build map
-    this.buildMapFromAscii(this.cache.text.get("boss_map") || this.defaultBossAscii());
+    const result = MapBuilder.build(this, {
+    sourceKey: "boss_map", // use your BossLevel.txt
+    tile: this.TILE,
+    // cols/rows optional; builder will derive from the file
+    on: {
+        // In boss arenas, 'B' is boss spawn marker inside the arena (not a gate)
+        onBossMarker: (x, y) => { this.bossSpawn = { x, y: y - 20 }; }
+    }
+    });
+
+    // world bounds from the computed map size
+    this.physics.world.setBounds(0, 0, this.levelWidth, this.levelHeight);
+    this.cameras.main.setBounds(0, 0, this.levelWidth, this.levelHeight);
+
 
     // World & camera
     this.physics.world.setBounds(0, 0, this.levelWidth, this.levelHeight);

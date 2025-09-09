@@ -2,6 +2,7 @@
 import Phaser from "phaser";
 import { Enemies } from "./enemies"; // adjust relative path if needed
 import { BossEnemies } from "./BossEnemies"; // adjust relative path if needed
+import { MapBuilder } from "./MapBuilder";
 
 
 
@@ -94,6 +95,7 @@ export default class MainScene extends Phaser.Scene {
     this.coins = data?.coins ?? 0;
     const saved = this.safeGet("bk_difficulty", null);
     // later when setting:
+    this.level = data?.level ?? this.safeGetInt("bk_level", 1); // default level 1
     this.difficulty = data?.difficulty ?? saved ?? "easy";
     this.maxAlive = 0;
 
@@ -172,7 +174,8 @@ export default class MainScene extends Phaser.Scene {
         // g.fillStyle(0x11131a, 1).fillRect(0, 0, 64, 64).generateTexture("bgDark", 64, 64).clear();
         // g.fillStyle(0x171a24, 1).fillRect(0, 0, 64, 64).generateTexture("bgMid", 64, 64).destroy();
         this.load.image("background", "/sprites/background4b.png");
-        this.load.text("map_level1",   "/maps/level1.txt");
+        MapBuilder.preload(this, { levels: [1] }); // preload /maps/level1.txt as "map_level1"
+
 
         // tiles
         this.load.image("top right corner", "/sprites/tiles/righttop.png");
@@ -291,7 +294,45 @@ export default class MainScene extends Phaser.Scene {
     this.toast = this.add.text(12, 36, "", { fontSize: 14, color: "#a8e6cf" }).setScrollFactor(0);
 
     // Build map & colliders
-    this.buildMapForDifficulty(this.difficulty);
+    MapBuilder.build(this, {
+        level: this.level,
+        tile: this.TILE,
+        cols: this.cols,
+        rows: this.rows,
+        on: {
+            onKey: (x,y) => this.trySpawnKey(x, y),
+            onDoor: (x,y) => this.trySpawnDoor(x, y),
+            onHiddenPassage: (x,y) => this.trySpawnHiddenPassage(x, y),
+            onHiddenBlock: (x,y) => this.trySpawnHiddenBlock(x, y),
+            onBossGate: (x, y, c, r, ordinal) => {
+            const tileId = `${c},${r}`;
+            const gx = x, gy = y;
+
+            if (this.isGateCleared(this.currentMapKey, tileId)) {
+                const blocker = this.mapSolids.create(gx, gy - 10, null).setVisible(false);
+                blocker.setSize(this.TILE*0.8, this.TILE*1.2).refreshBody();
+                if (!this.textures.exists("monumentTex")) {
+                const g = this.add.graphics();
+                g.fillStyle(0x4b6ea9, 1).fillRoundedRect(0,0,this.TILE*0.8,this.TILE*1.2,6)
+                .lineStyle(2,0xaad1ff,1).strokeRoundedRect(0,0,this.TILE*0.8,this.TILE*1.2,6)
+                .generateTexture("monumentTex", this.TILE*0.8, this.TILE*1.2).destroy();
+                }
+                this.add.image(gx, gy - 10, "monumentTex").setOrigin(0.5, 0.9);
+            } else {
+                if (!this.bossGates) this.bossGates = this.physics.add.group({ allowGravity:false, immovable:true });
+                const g = this.bossGates.create(gx, gy, null);
+                g.body.setSize(this.TILE*0.6, this.TILE*0.8);
+                g.setData("gatePos", {
+                mapKey: this.currentMapKey,
+                tileId,
+                bossIndex: ordinal,
+                x: gx, y: gy
+                });
+            }
+            }
+        }
+        });
+
     this.attachColliders();
 
     // If we just came back from the boss, drop the player at the last checkpoint
@@ -484,142 +525,142 @@ this.physics.add.overlap(this.player, this.bossGates, (_pl, gate) => {
     this.enemyMapCollider = this.physics.add.collider(this.enemies, this.mapSolids);
   }
 
-  buildMapForDifficulty(mode = "easy") {
-        this.detachColliders();
-        if (this.mapSolids) this.mapSolids.destroy(true);
-        this.mapSolids = this.physics.add.staticGroup();
-        this.allSpawnPoints = [];
+//   buildMapForDifficulty(mode = "easy") {
+//         this.detachColliders();
+//         if (this.mapSolids) this.mapSolids.destroy(true);
+//         this.mapSolids = this.physics.add.staticGroup();
+//         this.allSpawnPoints = [];
 
-        let ascii = this.cache.text.get("map_level1");
-        this.currentMapKey = "map_level1";
-        if (!ascii) ascii = this.makeDefaultAscii(this.cols, this.rows, mode);
-        ascii = this.fixAsciiToBounds(ascii, this.cols, this.rows);
+//         let ascii = this.cache.text.get("map_level1");
+//         this.currentMapKey = "map_level1";
+//         if (!ascii) ascii = this.makeDefaultAscii(this.cols, this.rows, mode);
+//         ascii = this.fixAsciiToBounds(ascii, this.cols, this.rows);
 
-        const lines = ascii.split("\n");
-        let foundS = false;
-        let gateCounter = 0;
+//         const lines = ascii.split("\n");
+//         let foundS = false;
+//         let gateCounter = 0;
 
-        for (let r = 0; r < this.rows; r++) {
-        const y = r * this.TILE + this.TILE / 2;
-        const line = lines[r];
-        for (let c = 0; c < this.cols; c++) {
-            const ch = line[c] || ".";
-            const x = c * this.TILE + this.TILE / 2;
-            if (ch === "x") {
-            const blk = this.mapSolids.create(x, y, "blockTex");
-            // testing purpose: use one texture sheet part for all blocks
-            blk.setVisible(false);
-            // this.add.image(x, y, 'sheet').setCrop(512 + 120, 96, 40, 40).setScale(1).setPosition(x-130, y+400);
-            const offsetY = 0; // adjust based on your sheet layout
-            const offsetX = 0; // adjust based on your sheet layout
-            const scale = 0.5;    // adjust based on your sheet layout
-            const scale2 = (0.7,0.6);
+//         for (let r = 0; r < this.rows; r++) {
+//         const y = r * this.TILE + this.TILE / 2;
+//         const line = lines[r];
+//         for (let c = 0; c < this.cols; c++) {
+//             const ch = line[c] || ".";
+//             const x = c * this.TILE + this.TILE / 2;
+//             if (ch === "x") {
+//             const blk = this.mapSolids.create(x, y, "blockTex");
+//             // testing purpose: use one texture sheet part for all blocks
+//             blk.setVisible(false);
+//             // this.add.image(x, y, 'sheet').setCrop(512 + 120, 96, 40, 40).setScale(1).setPosition(x-130, y+400);
+//             const offsetY = 0; // adjust based on your sheet layout
+//             const offsetX = 0; // adjust based on your sheet layout
+//             const scale = 0.5;    // adjust based on your sheet layout
+//             const scale2 = (0.7,0.6);
             
-            // use texture sheet parts for blocks
-            const left = (c === 0) || (line[c-1] !== "x");
-            const right = (c === this.cols - 1) || (line[c+1] !== "x");
-            const top = (r === 0) || (lines[r-1][c] !== "x");
-            const bottom = (r === this.rows - 1) || (lines[r+1][c] !== "x");
-            if (top && left)   this.add.image(x, y, "leftop left corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
-            else if (top && right)  this.add.image(x, y, "top right corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
-            else if (bottom && left) this.add.image(x, y, "bottom left corner").setScale(scale * 0.9).setPosition(offsetX + x, offsetY + y);
-            else if (bottom && right) this.add.image(x, y, "bottom right corner").setScale(scale * 0.9).setPosition(offsetX + x, offsetY + y);
-            else if (top) this.add.image(x, y, "top edge").setScale(scale2).setPosition(offsetX + x, offsetY + y);
-            else if (bottom) this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);
-            else {this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);};
+//             // use texture sheet parts for blocks
+//             const left = (c === 0) || (line[c-1] !== "x");
+//             const right = (c === this.cols - 1) || (line[c+1] !== "x");
+//             const top = (r === 0) || (lines[r-1][c] !== "x");
+//             const bottom = (r === this.rows - 1) || (lines[r+1][c] !== "x");
+//             if (top && left)   this.add.image(x, y, "leftop left corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
+//             else if (top && right)  this.add.image(x, y, "top right corner").setScale(scale2).setPosition(offsetX + x, offsetY + y);
+//             else if (bottom && left) this.add.image(x, y, "bottom left corner").setScale(scale * 0.9).setPosition(offsetX + x, offsetY + y);
+//             else if (bottom && right) this.add.image(x, y, "bottom right corner").setScale(scale * 0.9).setPosition(offsetX + x, offsetY + y);
+//             else if (top) this.add.image(x, y, "top edge").setScale(scale2).setPosition(offsetX + x, offsetY + y);
+//             else if (bottom) this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);
+//             else {this.add.image(x, y, "bottom dark edge").setScale(0.3).setPosition(offsetX + x, offsetY + y).setTint(0x777777);};
             
             
 
-            blk.refreshBody();
-            } else if (ch === "S") {
-            this.startPos = { x, y: y - 20 };
-            foundS = true;
-            } else if (ch === "E") {
-            this.allSpawnPoints.push({ x, y: y - this.TILE * 2 });
-            } else if (ch == "T") { // optional: treasure 
-            this.trySpawnTreasure(x, y - 20);
-            } else if (ch == "_") { // no ground, if collided with, spawn back to start and take 1 damage
-            const killZone = this.mapSolids.create(x, y +30, null).setSize(this.TILE, this.TILE).setVisible(false);
-            killZone.refreshBody();
-            this.physics.add.overlap(this.player, killZone, () => this.respawnPlayer(), null, this);
-            this.physics.add.overlap(this.enemies, killZone, (e) => e.destroy, null, this);
-            } else if (ch == "K") { // key 
-            this.trySpawnKey(x, y - 20);
-            } else if (ch == "D") { //door
-            this.trySpawnDoor(x, y);
-            } else if (ch == "H") { // hidden block
-            this.trySpawnHiddenPassage(x, y - 20);
-        } else if (ch === "Q") { // hidden block
-            this.trySpawnHiddenBlock(x, y - 20);
-            } else if (ch === "B") {
-               const tileId = `${c},${r}`;          // per-tile id
-                const gx = x, gy = y;
+//             blk.refreshBody();
+//             } else if (ch === "S") {
+//             this.startPos = { x, y: y - 20 };
+//             foundS = true;
+//             } else if (ch === "E") {
+//             this.allSpawnPoints.push({ x, y: y - this.TILE * 2 });
+//             } else if (ch == "T") { // optional: treasure 
+//             this.trySpawnTreasure(x, y - 20);
+//             } else if (ch == "_") { // no ground, if collided with, spawn back to start and take 1 damage
+//             const killZone = this.mapSolids.create(x, y +30, null).setSize(this.TILE, this.TILE).setVisible(false);
+//             killZone.refreshBody();
+//             this.physics.add.overlap(this.player, killZone, () => this.respawnPlayer(), null, this);
+//             this.physics.add.overlap(this.enemies, killZone, (e) => e.destroy, null, this);
+//             } else if (ch == "K") { // key 
+//             this.trySpawnKey(x, y - 20);
+//             } else if (ch == "D") { //door
+//             this.trySpawnDoor(x, y);
+//             } else if (ch == "H") { // hidden block
+//             this.trySpawnHiddenPassage(x, y - 20);
+//         } else if (ch === "Q") { // hidden block
+//             this.trySpawnHiddenBlock(x, y - 20);
+//             } else if (ch === "B") {
+//                const tileId = `${c},${r}`;          // per-tile id
+//                 const gx = x, gy = y;
 
-                if (this.isGateCleared(this.currentMapKey, tileId)) {
-                    // Already cleared -> show a monument (blocks re-entry)
-                    const blocker = this.mapSolids.create(gx, gy - 10, null).setVisible(false);
-                    blocker.setSize(this.TILE*0.8, this.TILE*1.2); blocker.refreshBody();
-                    this.add.image(gx, gy - 10, "monumentTex").setOrigin(0.5, 0.9);
-                } else {
-                    if (!this.bossGates) {
-                    this.bossGates = this.physics.add.group({ allowGravity:false, immovable:true });
-                    }
-                    const g = this.bossGates.create(gx, gy, null);
-                    g.body.setSize(this.TILE*0.6, this.TILE*0.8);
-                    g.setData("gatePos", {
-                        mapKey: this.currentMapKey,
-                        tileId: `${c},${r}`,
-                        bossIndex: gateCounter++,
-                        x, y
-                        });
-                }
-            }
+//                 if (this.isGateCleared(this.currentMapKey, tileId)) {
+//                     // Already cleared -> show a monument (blocks re-entry)
+//                     const blocker = this.mapSolids.create(gx, gy - 10, null).setVisible(false);
+//                     blocker.setSize(this.TILE*0.8, this.TILE*1.2); blocker.refreshBody();
+//                     this.add.image(gx, gy - 10, "monumentTex").setOrigin(0.5, 0.9);
+//                 } else {
+//                     if (!this.bossGates) {
+//                     this.bossGates = this.physics.add.group({ allowGravity:false, immovable:true });
+//                     }
+//                     const g = this.bossGates.create(gx, gy, null);
+//                     g.body.setSize(this.TILE*0.6, this.TILE*0.8);
+//                     g.setData("gatePos", {
+//                         mapKey: this.currentMapKey,
+//                         tileId: `${c},${r}`,
+//                         bossIndex: gateCounter++,
+//                         x, y
+//                         });
+//                 }
+//             }
 
-        }
-        }
-        if (!foundS) this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 };
-        if (this.allSpawnPoints.length === 0) this.allSpawnPoints.push({ x: this.levelWidth * 0.6, y: this.TILE * 3 });
+//         }
+//         }
+//         if (!foundS) this.startPos = { x: this.TILE * 2 + 20, y: this.TILE * 2 };
+//         if (this.allSpawnPoints.length === 0) this.allSpawnPoints.push({ x: this.levelWidth * 0.6, y: this.TILE * 3 });
 
-        this.player.setPosition(this.startPos.x, this.startPos.y);
-        this.player.setVelocity(0, 0);
-   }
-    fixAsciiToBounds(ascii, cols, rows)   {
-        const clean = ascii.replace(/\r/g, "");
-        let raw = clean.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && _ === ""));
-        if (raw.length > rows) raw = raw.slice(raw.length - rows);
-        else if (raw.length < rows) raw = new Array(rows - raw.length).fill(".".repeat(cols)).concat(raw);
-        const fixed = raw.map(l => {
-            const m = l.replace(/\t/g, " ");
-            if (m.length > cols) return m.slice(0, cols);
-            if (m.length < cols) return m + ".".repeat(cols - m.length);
-            return m;
-        });
-        return fixed.join("\n");
-    }
-    makeDefaultAscii(cols, rows, mode)    {           
-        const grid = Array.from({ length: rows }, () => Array(cols).fill("."));
-        const H = (r, c1, c2) => { for (let c = Math.max(0,c1); c <= Math.min(cols-1,c2); c++) grid[r][c] = "x"; };
-        H(rows-1, 0, cols-1); H(rows-2, 0, cols-1);
-        H(rows-6, 10, Math.min(25, cols-1));
-        H(rows-9, 35, Math.min(55, cols-1));
-        H(rows-12, 60, Math.min(75, cols-1));
-        H(rows-10, 2, 6);
-        grid[rows-4][3] = "S";
-        const addE = (c, r) => { if (r>=0 && r<rows && c>=0 && c<cols) grid[r][c] = "E"; };
-        if (mode === "easy") {
-        addE(Math.floor(cols * 0.45), rows - 7);
-        } else if (mode === "normal") {
-        addE(Math.floor(cols * 0.40), rows - 7);
-        addE(Math.floor(cols * 0.70), rows - 10);
-        } else {
-        addE(Math.floor(cols * 0.25), rows - 7);
-        addE(Math.floor(cols * 0.45), rows - 10);
-        addE(Math.floor(cols * 0.60), rows - 9);
-        addE(Math.floor(cols * 0.75), rows - 12);
-        addE(Math.floor(cols * 0.85), rows - 7);
-        }
-        return grid.map(r => r.join("")).join("\n");
-    }
+//         this.player.setPosition(this.startPos.x, this.startPos.y);
+//         this.player.setVelocity(0, 0);
+//    }
+//     fixAsciiToBounds(ascii, cols, rows)   {
+//         const clean = ascii.replace(/\r/g, "");
+//         let raw = clean.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && _ === ""));
+//         if (raw.length > rows) raw = raw.slice(raw.length - rows);
+//         else if (raw.length < rows) raw = new Array(rows - raw.length).fill(".".repeat(cols)).concat(raw);
+//         const fixed = raw.map(l => {
+//             const m = l.replace(/\t/g, " ");
+//             if (m.length > cols) return m.slice(0, cols);
+//             if (m.length < cols) return m + ".".repeat(cols - m.length);
+//             return m;
+//         });
+//         return fixed.join("\n");
+//     }
+//     makeDefaultAscii(cols, rows, mode)    {           
+//         const grid = Array.from({ length: rows }, () => Array(cols).fill("."));
+//         const H = (r, c1, c2) => { for (let c = Math.max(0,c1); c <= Math.min(cols-1,c2); c++) grid[r][c] = "x"; };
+//         H(rows-1, 0, cols-1); H(rows-2, 0, cols-1);
+//         H(rows-6, 10, Math.min(25, cols-1));
+//         H(rows-9, 35, Math.min(55, cols-1));
+//         H(rows-12, 60, Math.min(75, cols-1));
+//         H(rows-10, 2, 6);
+//         grid[rows-4][3] = "S";
+//         const addE = (c, r) => { if (r>=0 && r<rows && c>=0 && c<cols) grid[r][c] = "E"; };
+//         if (mode === "easy") {
+//         addE(Math.floor(cols * 0.45), rows - 7);
+//         } else if (mode === "normal") {
+//         addE(Math.floor(cols * 0.40), rows - 7);
+//         addE(Math.floor(cols * 0.70), rows - 10);
+//         } else {
+//         addE(Math.floor(cols * 0.25), rows - 7);
+//         addE(Math.floor(cols * 0.45), rows - 10);
+//         addE(Math.floor(cols * 0.60), rows - 9);
+//         addE(Math.floor(cols * 0.75), rows - 12);
+//         addE(Math.floor(cols * 0.85), rows - 7);
+//         }
+//         return grid.map(r => r.join("")).join("\n");
+//     }
 
           // ---------- Spawner ----------
         setupSpawner() {
