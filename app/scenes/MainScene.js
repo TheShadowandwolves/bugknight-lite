@@ -1,6 +1,7 @@
 // scenes/MainScene.js
 import Phaser from "phaser";
 import { Enemies } from "./enemies"; // adjust relative path if needed
+import { BossEnemies } from "./BossEnemies"; // adjust relative path if needed
 
 
 
@@ -358,12 +359,16 @@ this.physics.add.overlap(this.player, this.bossGates, (_pl, gate) => {
   if (this.inBossTransition) return;
   this.inBossTransition = true;
 
-  const gatePos = gate.getData("gatePos") || { mapKey: this.currentMapKey, tileId: "?", x: gate.x, y: gate.y };
+//   const gatePos = gate.getData("gatePos") || { mapKey: this.currentMapKey, tileId: "?", x: gate.x, y: gate.y };
+    const gatePos = gate.getData("gatePos");
+    const bossKey = BossEnemies.pickBossForGate(1 /* levelId */, gatePos.bossIndex);
   this.setCheckpointFromPlayer();
   this.safeSet("bk_boss_gate_pos", JSON.stringify(gatePos)); // optional
 
   this.scene.start("BossLevel", {
     from: this.scene.key,
+    levelId: 1,
+    bossKey,  
     difficulty: this.difficulty,
     coins: this.coins,
     checkpoint: this.checkpoint,
@@ -492,6 +497,7 @@ this.physics.add.overlap(this.player, this.bossGates, (_pl, gate) => {
 
         const lines = ascii.split("\n");
         let foundS = false;
+        let gateCounter = 0;
 
         for (let r = 0; r < this.rows; r++) {
         const y = r * this.TILE + this.TILE / 2;
@@ -560,7 +566,12 @@ this.physics.add.overlap(this.player, this.bossGates, (_pl, gate) => {
                     }
                     const g = this.bossGates.create(gx, gy, null);
                     g.body.setSize(this.TILE*0.6, this.TILE*0.8);
-                    g.setData("gatePos", { mapKey: this.currentMapKey, tileId, x: gx, y: gy });
+                    g.setData("gatePos", {
+                        mapKey: this.currentMapKey,
+                        tileId: `${c},${r}`,
+                        bossIndex: gateCounter++,
+                        x, y
+                        });
                 }
             }
 

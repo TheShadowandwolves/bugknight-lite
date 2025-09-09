@@ -1,5 +1,7 @@
 // scenes/BossLevelScene.js
 import Phaser from "phaser";
+import { BossEnemies } from "./BossEnemies";
+
 
 export default class BossLevelScene extends Phaser.Scene {
   constructor() { super("BossLevel"); }
@@ -21,6 +23,10 @@ safeGet(k, fallback = null) { try { return localStorage.getItem(k) ?? fallback; 
     this.coins = data?.coins | 0;
     this.checkpoint = data?.checkpoint || null;
     this.from = data?.from || "MainScene";
+
+    this.levelId = data?.levelId ?? 1;                       // which world/level
+    this.bossKey = data?.bossKey                             
+    ?? BossEnemies.pickBossForGate(this.levelId, data?.bossGatePos?.bossIndex ?? 0);
 
 
     // tile size for ASCII map
@@ -80,13 +86,16 @@ safeGet(k, fallback = null) { try { return localStorage.getItem(k) ?? fallback; 
 
 
     // Boss texture (procedural fallback). If you have a sheet, you can load it here instead.
-    if (!this.textures.exists("bossTex")) {
-      const g = this.add.graphics();
-      g.fillStyle(0x2e1a5f, 1).fillRect(0, 0, 64, 64);
-      g.lineStyle(2, 0x7a5cff, 1).strokeRect(1, 1, 62, 62);
-      g.fillStyle(0x7a5cff, 1).fillCircle(20, 28, 6).fillCircle(44, 28, 6);
-      g.generateTexture("bossTex", 64, 64).destroy();
-    }
+    // if (!this.textures.exists("bossTex")) {
+    //   const g = this.add.graphics();
+    //   g.fillStyle(0x2e1a5f, 1).fillRect(0, 0, 64, 64);
+    //   g.lineStyle(2, 0x7a5cff, 1).strokeRect(1, 1, 62, 62);
+    //   g.fillStyle(0x7a5cff, 1).fillCircle(20, 28, 6).fillCircle(44, 28, 6);
+    //   g.generateTexture("bossTex", 64, 64).destroy();
+    // }
+    // ADD:
+    BossEnemies.preload(this, this.levelId);
+
   }
 
   create() {
@@ -126,10 +135,19 @@ safeGet(k, fallback = null) { try { return localStorage.getItem(k) ?? fallback; 
     });
 
     // Boss
-    this.boss = this.physics.add.sprite(this.bossSpawn.x, this.bossSpawn.y, "bossTex").setCollideWorldBounds(true);
-    this.boss.body.setSize(56, 56, true);
-    this.boss.setBounce(0);
-    this.physics.add.collider(this.boss, this.mapSolids);
+    BossEnemies.createAnims(this, this.levelId);
+
+    this.boss = BossEnemies.spawn(
+    this,                 // scene
+    this.levelId,         // which level’s registry
+    this.bossKey,         // which boss
+    this.bossSpawn.x,
+    this.bossSpawn.y
+    );
+
+    // set HP bar from boss data
+    this.bossMaxHP = this.boss.getData("maxHP") ?? 30;
+    this.bossHP = this.boss.getData("hp") ?? this.bossMaxHP;
 
     // Overlaps: player attack vs boss
     this.physics.add.overlap(this.attack, this.boss, () => {
@@ -366,7 +384,7 @@ bossDefeated() {
     }
 
     // boss AI
-    this.bossAI(dt);
+    this.boss?.updateAI?.(this, delta);
 
     // HUD
     const hearts = "❤".repeat(this.playerHP) + "·".repeat(this.playerMaxHP - this.playerHP);
